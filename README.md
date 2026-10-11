@@ -69,10 +69,10 @@ AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DE
 
 ### Current status
 
-- Current phase: **1**
-- Last updated: 2026-10-10 ~21:45 IST
-- Overall: Core engine complete via API. Models, pure policy engine, hash-chained ledger, agent API-key auth, actions workflow, approvals with separation of duties, kill switches, escalation, template summaries, policy simulator. No UI yet (Phase 2).
-- Tests: **33 passed** (`PYTHONPATH=. python3 -m pytest -v`)
+- Current phase: **2**
+- Last updated: 2026-10-10 ~22:00 IST
+- Overall: Core engine + full human UI. Session auth, CSRF, design system, pages: Login, Overview, Live Feed, Approvals, Agents, Agent detail, Policies, Ledger, 404/500. API from Phase 1 still works. Demo Lab / seed arrive in Phase 3.
+- Tests: **37 passed** (`PYTHONPATH=. python3 -m pytest -v`)
 - `make verify`: not yet implemented (Phase 3)
 
 ### Feature checklist
@@ -88,8 +88,8 @@ AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DE
 | Approvals + separation of duties | done and tested | `app/services/approvals.py` | pytest workflow tests |
 | Escalation task | done and tested | `app/services/escalation.py` | test_escalation |
 | Simulator | done and tested | `app/policy/simulator.py` | test_policy_simulate |
-| Human auth / CSRF / RBAC | not started | `app/security.py` | — |
-| UI pages | not started | `app/web/` | — |
+| Human auth / CSRF / RBAC | done and tested | `app/security.py`, `app/web/routes.py` | login + CSRF tests |
+| UI pages | done and tested | `app/web/templates/`, `app/web/routes.py` | browser login → overview |
 | Seed / Demo Lab / SDK / smoke | not started | `scripts/`, `sdk/` | — |
 | Docker + Postgres | skeleton only | `Dockerfile`, `docker-compose.yml` | not fully exercised yet |
 
@@ -131,9 +131,9 @@ PYTHONPATH=. ruff format --check --no-cache app tests scripts sdk
 
 ### Next steps (ordered)
 
-1. **Phase 2 – Human interface**: session auth, CSRF, RBAC, base layout + design system, all pages 1–8 and 10.
-2. Acceptance: complete workflow in browser as admin/reviewer/auditor.
-3. Then Phase 3 (Demo Lab, seed, SDK, smoke), Phase 4 (Polish).
+1. **Phase 3 – Demo**: seed script, Demo Lab, demo_agent.py, SDK, smoke_test / make verify.
+2. Acceptance: make verify passes from clean seed.
+3. Phase 4 – Polish: Docker Postgres verification, DEMO_SCRIPT.md, final README.
 
 ### Conventions
 
@@ -257,4 +257,19 @@ curl -s -X POST http://localhost:8000/v1/ledger/verify -H 'X-User-Id: 1' | jq
 - Problems fixed: nested BEGIN IMMEDIATE on SQLite; Pydantic from_attributes; FastAPI detail wrapper in tests
 - Left unfinished: UI (Phase 2), seed/demo/SDK (Phase 3)
 - Next step: Phase 2 – Human interface (auth sessions, CSRF, all pages)
+
+#### Session 3: 2026-10-10
+
+- Goal: Complete Phase 2 (human interface).
+- What I changed:
+  - `app/security.py` – session cookies, CSRF, RedirectToLogin, require_web_user
+  - `app/web/routes.py` – all HTML routes (login, overview, feed, approvals, agents, policies, ledger, partials)
+  - `app/web/templates/*` – base layout + design system (Tailwind/Alpine/HTMX/Chart.js), all pages
+  - `app/main.py` – mount web router, security headers, 404/500, RedirectToLogin handler
+  - `scripts/bootstrap_admin.py` – create demo users for UI testing
+  - `tests/test_web_auth.py` – login, overview, redirect, CSRF smoke
+- What I ran: pytest → **37 passed**; ruff → all checks passed
+- Decisions: Starlette 1.7 TemplateResponse(request, name, context); Phase 1 X-User-Id API auth kept alongside sessions; auditors are read-only in approval UI
+- Left unfinished: Demo Lab, seed historical data, SDK, smoke verify (Phase 3)
+- Next step: Phase 3 – Demo
 

@@ -1,0 +1,10 @@
+<span id="ledger-badge" class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium
+  {% if ok %}bg-verified-muted text-verified dark:bg-teal-900/40 dark:text-teal-300{% else %}bg-deny-muted text-deny{% endif %}"
+  hx-get="/partials/ledger-badge" hx-trigger="every 30s" hx-swap="outerHTML">
+  {% if ok %}
+  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+  Ledger · seq {{ seq }} · {{ short_hash }}
+  {% else %}
+  FAIL · seq {{ broken_seq }}
+  {% endif %}
+</span>

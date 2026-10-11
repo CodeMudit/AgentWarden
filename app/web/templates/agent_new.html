@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Register Agent · AgentWarden{% endblock %}
+{% block page_title %}Register agent{% endblock %}
+{% block content %}
+<div class="max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+  <form method="post" action="/agents/new" class="space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div>
+      <label class="block text-sm font-medium mb-1">Name</label>
+      <input name="name" required maxlength="128" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" placeholder="refund-bot" />
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Purpose</label>
+      <textarea name="purpose" rows="2" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm"></textarea>
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Owner</label>
+      <select name="owner_user_id" required class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
+        {% for u in owners %}
+        <option value="{{ u.id }}">{{ u.name }} ({{ u.email }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Risk tier</label>
+      <select name="risk_tier" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
+        <option value="low">low</option>
+        <option value="medium" selected>medium</option>
+        <option value="high">high</option>
+      </select>
+    </div>
+    <button type="submit" class="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700">Create agent</button>
+  </form>
+</div>
+{% endblock %}

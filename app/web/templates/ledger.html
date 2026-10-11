@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Ledger · AgentWarden{% endblock %}
+{% block page_title %}Ledger{% endblock %}
+{% block content %}
+<div class="flex flex-wrap gap-3 mb-5 items-center">
+  <form method="post" action="/ledger/verify">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button class="rounded-xl bg-verified text-white px-4 py-2 text-sm font-medium hover:opacity-90">Verify chain</button>
+  </form>
+  <a href="/ledger/export?fmt=json" class="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm">Export JSON</a>
+  <a href="/ledger/export?fmt=csv" class="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm">Export CSV</a>
+  <form method="post" action="/ledger/checkpoint">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button class="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm">Download checkpoint</button>
+  </form>
+  {% if verify_result %}
+  <span class="text-sm font-medium px-3 py-1.5 rounded-full {% if verify_result.ok %}bg-allow-muted text-allow{% else %}bg-deny-muted text-deny{% endif %}">
+    {% if verify_result.ok %}PASS · {{ verify_result.checked }} entries{% else %}FAIL at seq {{ verify_result.first_broken_seq }} · {{ verify_result.reason }}{% endif %}
+  </span>
+  {% endif %}
+</div>
+
+<p class="text-xs text-slate-500 mb-3 font-mono">Head: seq={{ head.last_seq }} hash={{ head.last_hash[:16] }}…</p>
+
+<div class="space-y-2">
+  {% for e in entries %}
+  <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm {% if verify_result and not verify_result.ok and verify_result.first_broken_seq == e.seq %}ring-2 ring-deny{% endif %}" id="seq-{{ e.seq }}">
+    <div class="flex flex-wrap items-center gap-2 text-sm mb-1">
+      <span class="font-mono font-semibold text-brand-600">#{{ e.seq }}</span>
+      <span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-xs">{{ e.event_type }}</span>
+      <span class="text-xs text-slate-500">{{ e.actor_type }}:{{ e.actor_id or '—' }}</span>
+      <span class="text-xs text-slate-400 ml-auto">{{ e.ts }}</span>
+    </div>
+    <div class="flex flex-wrap gap-3 text-xs font-mono text-slate-500">
+      <span title="{{ e.hash }}">hash {{ e.hash[:12] }}…</span>
+      <span title="{{ e.prev_hash }}">prev {{ e.prev_hash[:12] }}…</span>
+      <button type="button" class="text-brand-600 hover:underline" onclick="navigator.clipboard.writeText('{{ e.hash }}')">copy hash</button>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-sm text-slate-400 py-8 text-center">Ledger is empty</p>
+  {% endfor %}
+</div>
+{% endblock %}

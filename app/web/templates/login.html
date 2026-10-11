@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Login · AgentWarden{% endblock %}
+{% block auth_content %}
+<div class="min-h-screen flex">
+  <div class="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-brand-700 via-brand-600 to-indigo-800 text-white p-12 flex-col justify-between">
+    <div>
+      <div class="flex items-center gap-3 mb-12">
+        <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center font-bold">AW</div>
+        <span class="text-xl font-semibold">AgentWarden</span>
+      </div>
+      <h2 class="text-3xl font-bold leading-tight mb-4">Governance for AI agents that hold real authority.</h2>
+      <p class="text-indigo-100 text-lg max-w-md">Default-deny policies. Human accountability. A ledger you can re-verify.</p>
+    </div>
+    <p class="text-indigo-200 text-sm">Deterministic rules decide. Humans approve. The chain remembers.</p>
+  </div>
+  <div class="flex-1 flex items-center justify-center p-8 bg-slate-50 dark:bg-slate-950">
+    <div class="w-full max-w-md">
+      <h1 class="text-2xl font-bold mb-1 text-slate-900 dark:text-white">Sign in</h1>
+      <p class="text-slate-500 dark:text-slate-400 mb-8 text-sm">Use your AgentWarden account</p>
+      {% if error %}
+      <div class="mb-4 rounded-xl bg-deny-muted text-deny dark:bg-red-900/30 dark:text-red-300 px-4 py-3 text-sm">{{ error }}</div>
+      {% endif %}
+      <form method="post" action="/login" class="space-y-4">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div>
+          <label class="block text-sm font-medium mb-1.5" for="email">Email</label>
+          <input id="email" name="email" type="email" required autocomplete="username"
+                 class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1.5" for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password"
+                 class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+        </div>
+        <button type="submit" class="w-full rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium py-2.5 text-sm transition">Sign in</button>
+      </form>
+      {% if demo_mode %}
+      <div class="mt-8 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-sm">
+        <p class="font-medium mb-2 text-slate-700 dark:text-slate-200">Demo credentials</p>
+        <ul class="space-y-1 text-slate-500 dark:text-slate-400 text-xs font-mono">
+          <li>admin@demo.local / demo-admin-pass</li>
+          <li>reviewer_a@demo.local / demo-reviewer-pass</li>
+          <li>reviewer_b@demo.local / demo-reviewer-pass</li>
+          <li>auditor@demo.local / demo-auditor-pass</li>
+        </ul>
+        <p class="mt-2 text-xs text-slate-400">Created by <code>make seed</code> (Phase 3). Until then create users via API.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

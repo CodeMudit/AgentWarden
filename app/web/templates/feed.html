@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Live Feed · AgentWarden{% endblock %}
+{% block page_title %}Live Feed{% endblock %}
+{% block content %}
+<div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+  <div class="px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+    <p class="text-sm text-slate-500">Streaming actions · updates every 2s</p>
+    <span class="flex items-center gap-1.5 text-xs text-allow"><span class="w-1.5 h-1.5 rounded-full bg-allow animate-pulse"></span> Live</span>
+  </div>
+  <div id="feed-rows" hx-get="/partials/feed-rows" hx-trigger="load, every 2s" hx-swap="innerHTML">
+    {% include "partials/feed_rows.html" %}
+  </div>
+</div>
+
+<!-- Detail drawer -->
+<div id="drawer" class="fixed inset-y-0 right-0 w-full max-w-md bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-xl z-50 transform translate-x-full transition-transform"
+     x-data="{ open: false }" @open-drawer.window="open=true; $el.classList.remove('translate-x-full')" @close-drawer.window="open=false; $el.classList.add('translate-x-full')">
+  <div class="flex items-center justify-between px-5 h-16 border-b border-slate-200 dark:border-slate-800">
+    <h2 class="font-semibold">Action detail</h2>
+    <button @click="$dispatch('close-drawer')" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Close">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div id="drawer-body" class="p-5 overflow-y-auto h-[calc(100%-4rem)]"></div>
+</div>
+<div id="drawer-backdrop" class="fixed inset-0 bg-black/30 z-40 hidden" onclick="document.getElementById('drawer').classList.add('translate-x-full'); this.classList.add('hidden')"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+function openDetail(id) {
+  document.getElementById('drawer-backdrop').classList.remove('hidden');
+  document.getElementById('drawer').classList.remove('translate-x-full');
+  htmx.ajax('GET', '/partials/action-detail/' + id, {target: '#drawer-body', swap: 'innerHTML'});
+}
+</script>
+{% endblock %}

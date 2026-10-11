@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ agent.name }} · AgentWarden{% endblock %}
+{% block page_title %}{{ agent.name }}{% endblock %}
+{% block content %}
+<div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm mb-6">
+  <div class="flex flex-wrap gap-4 items-start justify-between">
+    <div>
+      <p class="text-sm text-slate-500">Responsible human</p>
+      <p class="font-semibold text-lg">{{ owner.name }} <span class="text-sm font-normal text-slate-500">({{ owner.email }})</span></p>
+      <p class="text-sm text-slate-500 mt-2">{{ agent.purpose }}</p>
+    </div>
+    <div class="flex gap-2 text-xs">
+      <span class="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800">{{ agent.risk_tier }} risk</span>
+      <span class="px-2.5 py-1 rounded-full {% if agent.status == 'active' %}bg-allow-muted text-allow{% else %}bg-slate-200{% endif %}">{{ agent.status }}</span>
+    </div>
+  </div>
+  <div class="grid grid-cols-3 gap-4 mt-5 pt-5 border-t border-slate-100 dark:border-slate-800">
+    <div><p class="text-xs text-slate-500">Total requests</p><p class="text-xl font-semibold">{{ stats.total }}</p></div>
+    <div><p class="text-xs text-slate-500">Allowed</p><p class="text-xl font-semibold text-allow">{{ stats.allowed }}</p></div>
+    <div><p class="text-xs text-slate-500">Denied</p><p class="text-xl font-semibold text-deny">{{ stats.denied }}</p></div>
+  </div>
+</div>
+
+<h2 class="text-sm font-semibold mb-3">Action timeline</h2>
+{% if timeline %}
+<ol class="space-y-3 border-l-2 border-slate-200 dark:border-slate-700 ml-2">
+  {% for t in timeline %}
+  <li class="pl-4 relative">
+    <span class="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full bg-brand-500"></span>
+    <p class="text-xs text-slate-400">{{ t.ts }}</p>
+    <p class="text-sm font-medium">{{ t.tool }} · {{ t.decision or t.status }}</p>
+    <p class="text-xs text-slate-500">{{ t.reason }}</p>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="text-sm text-slate-400">No actions yet for this agent.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}API Key · AgentWarden{% endblock %}
+{% block page_title %}Agent created{% endblock %}
+{% block content %}
+<div class="max-w-lg rounded-2xl border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-6 shadow-sm" x-data="{ copied: false }">
+  <h2 class="font-semibold mb-2">API key — shown once</h2>
+  <p class="text-sm text-slate-600 dark:text-slate-300 mb-4">Copy and store this key securely. It cannot be retrieved again.</p>
+  <div class="flex gap-2 mb-4">
+    <code id="api-key" class="flex-1 font-mono text-sm bg-white dark:bg-slate-900 rounded-lg px-3 py-2 border border-slate-200 dark:border-slate-700 break-all">{{ api_key }}</code>
+    <button type="button" @click="navigator.clipboard.writeText('{{ api_key }}'); copied=true; setTimeout(() => copied=false, 2000)"
+            class="rounded-xl bg-brand-600 text-white px-3 py-2 text-sm shrink-0" x-text="copied ? 'Copied' : 'Copy'"></button>
+  </div>
+  <p class="text-sm mb-4">Agent <strong>{{ agent.name }}</strong> (id {{ agent.id }}) is active.</p>
+  <a href="/agents" class="text-brand-600 text-sm hover:underline">Back to agents</a>
+</div>
+{% endblock %}

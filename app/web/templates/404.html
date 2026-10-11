@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Not found · AgentWarden{% endblock %}
+{% block page_title %}Not found{% endblock %}
+{% block content %}
+<div class="text-center py-24">
+  <p class="text-6xl font-bold text-slate-200 dark:text-slate-700">404</p>
+  <p class="mt-4 text-slate-500">This page does not exist.</p>
+  <a href="/" class="mt-6 inline-block text-brand-600 hover:underline text-sm">Back to overview</a>
+</div>
+{% endblock %}
+{% block auth_content %}
+<div class="min-h-screen flex items-center justify-center">
+  <div class="text-center">
+    <p class="text-6xl font-bold text-slate-200">404</p>
+    <a href="/login" class="text-brand-600 text-sm">Sign in</a>
+  </div>
+</div>
+{% endblock %}

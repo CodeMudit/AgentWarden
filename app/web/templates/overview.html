@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Overview · AgentWarden{% endblock %}
+{% block page_title %}Overview{% endblock %}
+{% block content %}
+<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
+  {% for label, value, color in [
+    ('Actions today', stats.actions_today, 'text-slate-900 dark:text-white'),
+    ('Allowed', stats.allowed, 'text-allow'),
+    ('Denied', stats.denied, 'text-deny'),
+    ('Pending', stats.pending, 'text-pending'),
+    ('Escalated', stats.escalated, 'text-escalated'),
+    ('Suspended agents', stats.suspended_agents, 'text-slate-600 dark:text-slate-300'),
+  ] %}
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+    <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">{{ label }}</p>
+    <p class="mt-1 text-2xl font-semibold {{ color }}">{{ value }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid lg:grid-cols-3 gap-6 mb-6">
+  <div class="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+    <h2 class="text-sm font-semibold mb-4">Decisions over time</h2>
+    <canvas id="chart-time" height="120"></canvas>
+  </div>
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+    <h2 class="text-sm font-semibold mb-4">By agent</h2>
+    <canvas id="chart-agent" height="120"></canvas>
+  </div>
+</div>
+
+<div class="grid lg:grid-cols-2 gap-6">
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold">Needs attention</h2>
+      <a href="/approvals" class="text-xs text-brand-600 hover:underline">View queue</a>
+    </div>
+    {% if needs_attention %}
+    <ul class="divide-y divide-slate-100 dark:divide-slate-800">
+      {% for ar in needs_attention %}
+      <li class="py-3 flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-medium truncate">{{ ar.agent_name }} · {{ ar.tool }}</p>
+          <p class="text-xs text-slate-500 truncate">{{ ar.summary or ar.reason }}</p>
+        </div>
+        <span class="shrink-0 text-xs px-2 py-0.5 rounded-full
+          {% if ar.status == 'escalated' %}bg-escalated-muted text-escalated{% else %}bg-pending-muted text-pending{% endif %}">
+          {{ ar.status }}
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="text-center py-8 text-slate-400 text-sm">
+      <svg class="w-12 h-12 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      All clear — no pending or escalated requests
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+    <h2 class="text-sm font-semibold mb-4">Ledger status</h2>
+    <p class="text-xs text-slate-500 mb-1">Latest hash</p>
+    <p class="font-mono text-xs break-all bg-slate-50 dark:bg-slate-800 rounded-lg p-3 mb-4">{{ ledger_hash or '—' }}</p>
+    <p class="text-sm mb-4">Sequence: <strong>{{ ledger_seq or 0 }}</strong>
+      · Avg approval time: <strong>{{ stats.avg_approval_seconds or '—' }}{% if stats.avg_approval_seconds %}s{% endif %}</strong>
+    </p>
+    <form method="post" action="/ledger/verify">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit" class="rounded-xl bg-verified text-white text-sm font-medium px-4 py-2 hover:opacity-90">Verify chain</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const timeData = {{ chart_time | tojson }};
+const agentData = {{ chart_agent | tojson }};
+new Chart(document.getElementById('chart-time'), {
+  type: 'line',
+  data: {
+    labels: timeData.labels,
+    datasets: [
+      { label: 'Allow', data: timeData.allow, borderColor: '#16a34a', tension: 0.3, fill: false },
+      { label: 'Deny', data: timeData.deny, borderColor: '#dc2626', tension: 0.3, fill: false },
+      { label: 'Pending', data: timeData.pending, borderColor: '#d97706', tension: 0.3, fill: false },
+    ]
+  },
+  options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+});
+new Chart(document.getElementById('chart-agent'), {
+  type: 'doughnut',
+  data: {
+    labels: agentData.labels,
+    datasets: [{ data: agentData.values, backgroundColor: ['#4f46e5','#0d9488','#d97706','#dc2626','#64748b'] }]
+  },
+  options: { plugins: { legend: { position: 'bottom' } } }
+});
+</script>
+{% endblock %}

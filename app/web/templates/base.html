@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full" x-data="{ dark: localStorage.getItem('aw-theme') === 'dark', sidebarOpen: false }"
+      :class="{ 'dark': dark }" x-init="$watch('dark', v => localStorage.setItem('aw-theme', v ? 'dark' : 'light'))">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}AgentWarden{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#4f46e5', 50:'#eef2ff', 100:'#e0e7ff', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca' },
+            allow: { DEFAULT: '#16a34a', muted: '#dcfce7' },
+            deny: { DEFAULT: '#dc2626', muted: '#fee2e2' },
+            pending: { DEFAULT: '#d97706', muted: '#fef3c7' },
+            escalated: { DEFAULT: '#ea580c', muted: '#ffedd5' },
+            verified: { DEFAULT: '#0d9488', muted: '#ccfbf1' },
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          borderRadius: { xl: '0.75rem', '2xl': '1rem' },
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .htmx-swapping { opacity: 0; transition: opacity 0.2s ease-out; }
+    .status-pill { @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium; }
+  </style>
+  <meta name="csrf-token" content="{{ csrf_token or '' }}" />
+  {% block head %}{% endblock %}
+</head>
+<body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans antialiased">
+  {% if current_user %}
+  <div class="min-h-full flex">
+    <!-- Sidebar -->
+    <aside class="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+      <div class="flex items-center gap-2 px-5 h-16 border-b border-slate-200 dark:border-slate-800">
+        <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">AW</div>
+        <span class="font-semibold tracking-tight">AgentWarden</span>
+      </div>
+      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        {% set nav = [
+          ('/', 'Overview', 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'),
+          ('/feed', 'Live Feed', 'M13 10V3L4 14h7v7l9-11h-7z'),
+          ('/approvals', 'Approvals', 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'),
+          ('/agents', 'Agents', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+          ('/policies', 'Policies', 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'),
+          ('/ledger', 'Ledger', 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10'),
+        ] %}
+        {% for href, label, icon in nav %}
+        <a href="{{ href }}" class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium
+          {% if request.url.path == href or (href != '/' and request.url.path.startswith(href)) %}
+            bg-brand-50 text-brand-700 dark:bg-brand-600/20 dark:text-brand-100
+          {% else %}
+            text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800
+          {% endif %}">
+          <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="{{ icon }}"/></svg>
+          {{ label }}
+        </a>
+        {% endfor %}
+      </nav>
+      <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+        v{{ app_version }} · {{ current_user.role }}
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="lg:pl-64 flex flex-col flex-1 min-w-0">
+      <header class="sticky top-0 z-30 h-16 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur flex items-center justify-between px-4 sm:px-6">
+        <div class="flex items-center gap-3">
+          <button @click="sidebarOpen = !sidebarOpen" class="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Menu">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <h1 class="text-lg font-semibold tracking-tight">{% block page_title %}Overview{% endblock %}</h1>
+        </div>
+        <div class="flex items-center gap-3">
+          <!-- System status -->
+          <span class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium
+            {% if system_frozen %}bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200{% else %}bg-allow-muted text-allow dark:bg-green-900/40 dark:text-green-300{% endif %}">
+            <span class="w-1.5 h-1.5 rounded-full {% if system_frozen %}bg-slate-500{% else %}bg-allow{% endif %}"></span>
+            {% if system_frozen %}FROZEN{% else %}OPERATIONAL{% endif %}
+          </span>
+          <!-- Ledger badge -->
+          <span id="ledger-badge" class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-verified-muted text-verified dark:bg-teal-900/40 dark:text-teal-300"
+                hx-get="/partials/ledger-badge" hx-trigger="load, every 30s" hx-swap="outerHTML">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            Ledger · seq {{ ledger_seq or 0 }}
+          </span>
+          <button @click="dark = !dark" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Toggle theme">
+            <svg x-show="!dark" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+            <svg x-show="dark" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+          </button>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="hidden md:inline text-slate-600 dark:text-slate-300">{{ current_user.name }}</span>
+            <form method="post" action="/logout">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit" class="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-xs underline">Logout</button>
+            </form>
+          </div>
+        </div>
+      </header>
+
+      <!-- Mobile sidebar -->
+      <div x-show="sidebarOpen" x-cloak class="lg:hidden fixed inset-0 z-40">
+        <div class="absolute inset-0 bg-black/40" @click="sidebarOpen=false"></div>
+        <aside class="absolute left-0 top-0 bottom-0 w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4">
+          <nav class="space-y-1 mt-4">
+            {% for href, label, icon in nav %}
+            <a href="{{ href }}" class="block px-3 py-2 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800">{{ label }}</a>
+            {% endfor %}
+          </nav>
+        </aside>
+      </div>
+
+      <main class="flex-1 p-4 sm:p-6">
+        {% if request.query_params.get('toast') %}
+        <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show=false, 3500)"
+             class="mb-4 rounded-xl border border-allow/30 bg-allow-muted text-allow dark:bg-green-900/30 dark:text-green-300 px-4 py-3 text-sm">
+          {{ request.query_params.get('toast') }}
+        </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  {% else %}
+    {% block auth_content %}{% endblock %}
+  {% endif %}
+  {% block scripts %}{% endblock %}
+  <script>
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      if (meta && meta.content) evt.detail.headers['X-CSRF-Token'] = meta.content;
+    });
+  </script>
+</body>
+</html>

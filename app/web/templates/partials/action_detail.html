@@ -1,0 +1,38 @@
+<div class="space-y-4">
+  <div>
+    <p class="text-xs text-slate-500">Agent · Tool</p>
+    <p class="font-medium">{{ ar.agent_name }} · <span class="font-mono text-sm">{{ ar.tool }}</span></p>
+  </div>
+  <div>
+    <p class="text-xs text-slate-500 mb-1">Summary</p>
+    <p class="text-sm">{{ ar.summary or '—' }}</p>
+  </div>
+  <div>
+    <p class="text-xs text-slate-500 mb-1">Parameters</p>
+    <pre class="text-xs bg-slate-50 dark:bg-slate-800 rounded-lg p-3 overflow-x-auto">{{ ar.params | tojson(indent=2) }}</pre>
+  </div>
+  <div class="grid grid-cols-2 gap-3 text-sm">
+    <div><p class="text-xs text-slate-500">Status</p><p class="font-medium">{{ ar.status }}</p></div>
+    <div><p class="text-xs text-slate-500">Decision</p><p class="font-medium">{{ ar.decision or '—' }}</p></div>
+    <div><p class="text-xs text-slate-500">Rule</p><p class="font-mono text-xs">{{ ar.matched_rule_id or '—' }}</p></div>
+    <div><p class="text-xs text-slate-500">Policy v</p><p>{{ ar.policy_version or '—' }}</p></div>
+  </div>
+  {% if ar.decision_reason %}
+  <div>
+    <p class="text-xs text-slate-500 mb-1">Reviewer reason</p>
+    <p class="text-sm">{{ ar.decision_reason }}</p>
+  </div>
+  {% endif %}
+  <div>
+    <p class="text-xs text-slate-500 mb-2">Timeline</p>
+    <ol class="space-y-2 border-l-2 border-slate-200 dark:border-slate-700 pl-4">
+      {% for t in timeline %}
+      <li class="text-xs">
+        <span class="text-slate-400">{{ t.ts }}</span>
+        <span class="font-medium ml-1">{{ t.event }}</span>
+        {% if t.detail %}<span class="text-slate-500"> — {{ t.detail }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+</div>

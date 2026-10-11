@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Policies · AgentWarden{% endblock %}
+{% block page_title %}Policies{% endblock %}
+{% block content %}
+<div class="grid lg:grid-cols-2 gap-6">
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+    <h2 class="text-sm font-semibold mb-3">Active policy {% if active %}v{{ active.version }}{% endif %}</h2>
+    {% if active %}
+    <pre class="text-xs font-mono bg-slate-50 dark:bg-slate-800 rounded-xl p-4 overflow-auto max-h-96">{{ active.rules | tojson(indent=2) }}</pre>
+    <p class="text-xs text-slate-500 mt-2">{{ active.note or '' }} · created {{ active.created_at }}</p>
+    {% else %}
+    <p class="text-sm text-slate-400">No active policy — default deny for all actions.</p>
+    {% endif %}
+  </div>
+
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+    <h2 class="text-sm font-semibold mb-3">Version history</h2>
+    {% if versions %}
+    <ul class="divide-y divide-slate-100 dark:divide-slate-800">
+      {% for p in versions %}
+      <li class="py-2 flex items-center justify-between text-sm">
+        <span>v{{ p.version }} {% if p.is_active %}<span class="text-xs text-allow">active</span>{% endif %}</span>
+        {% if current_user.role == 'admin' and not p.is_active %}
+        <form method="post" action="/policies/{{ p.id }}/activate">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="text-xs text-brand-600 hover:underline">Activate</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-slate-400">No policies yet</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if current_user.role == 'admin' %}
+<div class="mt-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm" x-data="{ tab: 'json', simResult: null }">
+  <h2 class="text-sm font-semibold mb-3">Create / simulate policy</h2>
+  <form method="post" action="/policies/create" class="space-y-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label class="block text-sm">Policy JSON</label>
+    <textarea name="rules_json" rows="12" required class="w-full font-mono text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2">{{ default_policy_json }}</textarea>
+    <input name="note" placeholder="Note (optional)" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+    {% if policy_error %}
+    <p class="text-sm text-deny">{{ policy_error }}</p>
+    {% endif %}
+    <div class="flex gap-2">
+      <button type="submit" name="action" value="create" class="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-medium">Save as new version</button>
+      <button type="submit" name="action" value="simulate" class="rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm">Simulate</button>
+    </div>
+  </form>
+  {% if sim %}
+  <div class="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 text-sm">
+    <p class="font-medium mb-2">Simulation result</p>
+    <p>Total {{ sim.total }} · Unchanged {{ sim.unchanged }} · Newly allowed {{ sim.newly_allowed }} · Newly denied {{ sim.newly_denied }} · Newly require approval {{ sim.newly_require_approval }}</p>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
