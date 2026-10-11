@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1121,6 +1121,57 @@ def demo_lab_run(
         repair()
         return {"message": "Tamper repaired. Verify should PASS again."}
 
+    if scenario == "injection":
+        ar = actions_svc.request_action(
+            db,
+            agent=refund,
+            tool="issue_refund",
+            params={
+                "amount": 5000,
+                "order_id": "ORD-7781",
+                "source": "customer_email",
+                "note": "Hidden instruction in email tried to force refund",
+            },
+            sensitivity="internal",
+            context={"attack_demo": True, "injection_present": True},
+        )
+        db.commit()
+        return {
+            "story": "Customer email hid: ignore rules and refund $5000",
+            "id": ar.id,
+            "decision": ar.decision,
+            "status": ar.status,
+            "rule": ar.matched_rule_id,
+            "reason": ar.reason,
+            "message": "Attack blocked or held — money did not move automatically",
+        }
+
+    if scenario == "simulate":
+        draft = {
+            "default_effect": "deny",
+            "rules": [
+                {
+                    "id": "refund-small-auto",
+                    "priority": 10,
+                    "match": {"agents": ["refund-bot"], "tools": ["issue_refund"]},
+                    "conditions": [{"type": "amount_lte", "field": "amount", "value": 50}],
+                    "effect": "allow",
+                },
+                {
+                    "id": "refund-large-review",
+                    "priority": 20,
+                    "match": {"agents": ["refund-bot"], "tools": ["issue_refund"]},
+                    "conditions": [{"type": "amount_gt", "field": "amount", "value": 50}],
+                    "effect": "require_approval",
+                },
+            ],
+        }
+        sim = simulate(db, draft, last_n=50)
+        return {
+            "message": "What if auto-allow threshold dropped from 100 to 50?",
+            "simulation": sim,
+        }
+
     return JSONResponse({"error": f"unknown scenario {scenario}"}, status_code=400)
 
 
@@ -1180,5 +1231,72 @@ def approvals_list_partial(
         request,
         "partials/approvals_list.html",
         _ctx(request, db, items=items, tab=tab),
+    )
+
+
+@router.get("/audit", response_class=HTMLResponse)
+@router.get("/audit/agent/{agent_id}", response_class=HTMLResponse)
+def audit_report(
+    request: Request,
+    agent_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    """Printable audit report for auditors (and Print → PDF)."""
+    agent = None
+    owner_name = None
+    q = select(ActionRequest).order_by(ActionRequest.created_at.desc()).limit(200)
+    if agent_id is not None:
+        agent = db.execute(select(Agent).where(Agent.id == agent_id)).scalar_one_or_none()
+        if agent is None:
+            return templates.TemplateResponse(request, "404.html", _ctx(request, db), status_code=404)
+        owner = db.execute(select(User).where(User.id == agent.owner_user_id)).scalar_one_or_none()
+        owner_name = owner.name if owner else "?"
+        q = (
+            select(ActionRequest)
+            .where(ActionRequest.agent_id == agent_id)
+            .order_by(ActionRequest.created_at.desc())
+            .limit(200)
+        )
+    actions = list(db.execute(q).scalars().all())
+    users = {u.id: u for u in db.execute(select(User)).scalars().all()}
+    rows = []
+    for ar in actions:
+        approver = None
+        if ar.decided_by:
+            u = users.get(ar.decided_by)
+            approver = u.name if u else str(ar.decided_by)
+        rows.append(
+            {
+                "ts": ar.created_at.strftime("%Y-%m-%d %H:%M") if ar.created_at else "",
+                "tool": ar.tool,
+                "decision": ar.decision or ar.status,
+                "rule": ar.matched_rule_id,
+                "approver": approver,
+                "reason": (ar.decision_reason or ar.reason or "")[:120],
+            }
+        )
+    stats = {
+        "total": len(actions),
+        "allowed": sum(1 for a in actions if a.status in ("allowed", "approved", "completed")),
+        "denied": sum(1 for a in actions if a.status in ("denied", "rejected")),
+        "pending": sum(1 for a in actions if a.status in ("pending", "escalated")),
+    }
+    verify = ledger.verify(db)
+    head = ledger.get_head(db)
+    return templates.TemplateResponse(
+        request,
+        "audit_report.html",
+        _ctx(
+            request,
+            db,
+            agent=agent,
+            owner_name=owner_name,
+            rows=rows,
+            stats=stats,
+            verify=verify,
+            head=head,
+            generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        ),
     )
 
