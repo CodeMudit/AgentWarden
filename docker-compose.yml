@@ -1,0 +1,34 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://agentwarden:agentwarden@db:5432/agentwarden
+      SECRET_KEY: docker-compose-dev-secret-change-in-prod
+      LEDGER_CHECKPOINT_KEY: docker-compose-ledger-key
+      DEMO_MODE: "true"
+      DEBUG: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentwarden
+      POSTGRES_PASSWORD: agentwarden
+      POSTGRES_DB: agentwarden
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentwarden -d agentwarden"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
