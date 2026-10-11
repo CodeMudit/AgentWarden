@@ -69,11 +69,11 @@ AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DE
 
 ### Current status
 
-- Current phase: **2**
-- Last updated: 2026-10-10 ~22:00 IST
-- Overall: Core engine + full human UI. Session auth, CSRF, design system, pages: Login, Overview, Live Feed, Approvals, Agents, Agent detail, Policies, Ledger, 404/500. API from Phase 1 still works. Demo Lab / seed arrive in Phase 3.
+- Current phase: **3**
+- Last updated: 2026-10-10 ~22:30 IST
+- Overall: Demo-ready. Seed, Demo Lab, SDK, demo_agent, smoke_test/make verify all work. Unit tests 37 passed; make verify PASS against seeded server.
 - Tests: **37 passed** (`PYTHONPATH=. python3 -m pytest -v`)
-- `make verify`: not yet implemented (Phase 3)
+- `make verify`: **PASS** (against running server after seed)
 
 ### Feature checklist
 
@@ -90,7 +90,7 @@ AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DE
 | Simulator | done and tested | `app/policy/simulator.py` | test_policy_simulate |
 | Human auth / CSRF / RBAC | done and tested | `app/security.py`, `app/web/routes.py` | login + CSRF tests |
 | UI pages | done and tested | `app/web/templates/`, `app/web/routes.py` | browser login → overview |
-| Seed / Demo Lab / SDK / smoke | not started | `scripts/`, `sdk/` | — |
+| Seed / Demo Lab / SDK / smoke | done and tested | `scripts/seed.py`, Demo Lab, `sdk/`, `smoke_test.py` | make seed && make verify |
 | Docker + Postgres | skeleton only | `Dockerfile`, `docker-compose.yml` | not fully exercised yet |
 
 ### How to run, test, and demo
@@ -101,17 +101,24 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt && pip install -e .
 cp .env.example .env
 
-# Run
+# Seed + run
+PYTHONPATH=. python scripts/seed.py --reset
 make run                    # uvicorn on :8000
-# or: PYTHONPATH=. uvicorn app.main:app --reload --port 8000
+
+# UI: http://localhost:8000/login
+#   admin@demo.local / demo-admin-pass
 
 # Test / lint
 PYTHONPATH=. python3 -m pytest -v
-PYTHONPATH=. ruff check --no-cache app tests scripts sdk
-PYTHONPATH=. ruff format --check --no-cache app tests scripts sdk
+make lint
 
-# Seed / demo / verify → Phase 3
-# Docker → make docker-up (app + Postgres)
+# Terminal demo (set key from seed output)
+REFUND_BOT_KEY=aw_... PYTHONPATH=. python scripts/demo_agent.py
+
+# Smoke test (server must be running)
+PYTHONPATH=. python scripts/smoke_test.py   # or: make verify
+
+# Docker → make docker-up
 ```
 
 ### Decisions and Assumptions
@@ -131,9 +138,9 @@ PYTHONPATH=. ruff format --check --no-cache app tests scripts sdk
 
 ### Next steps (ordered)
 
-1. **Phase 3 – Demo**: seed script, Demo Lab, demo_agent.py, SDK, smoke_test / make verify.
-2. Acceptance: make verify passes from clean seed.
-3. Phase 4 – Polish: Docker Postgres verification, DEMO_SCRIPT.md, final README.
+1. **Phase 4 – Polish**: Dockerfile/Postgres end-to-end, structured logging, accessibility pass, docs/DEMO_SCRIPT.md, final README (architecture, security notes, limitations, credits).
+2. Confirm docker compose up + seed + verify against Postgres.
+3. Definition of done checklist in README.
 
 ### Conventions
 
@@ -272,4 +279,20 @@ curl -s -X POST http://localhost:8000/v1/ledger/verify -H 'X-User-Id: 1' | jq
 - Decisions: Starlette 1.7 TemplateResponse(request, name, context); Phase 1 X-User-Id API auth kept alongside sessions; auditors are read-only in approval UI
 - Left unfinished: Demo Lab, seed historical data, SDK, smoke verify (Phase 3)
 - Next step: Phase 3 – Demo
+
+#### Session 4: 2026-10-10
+
+- Goal: Complete Phase 3 (Demo).
+- What I changed:
+  - `scripts/seed.py` – users, agents, policy, 50 historical requests via real services
+  - `scripts/tamper.py` – tamper/repair ledger for demo
+  - `scripts/demo_agent.py` – terminal scenarios with rich
+  - `scripts/smoke_test.py` – full 6-step story; make verify
+  - `scripts/llm_agent.py` – optional Anthropic agent (exits cleanly without key)
+  - `sdk/agentwarden_sdk.py` – client + @governed decorator
+  - Demo Lab page + `/demo-lab/run/{scenario}` routes
+  - Makefile seed/demo/verify targets
+- What I ran: seed --reset OK; smoke_test → **All smoke checks passed**; pytest → **37 passed**
+- Decisions: seed prints API keys once; smoke test rotates refund-bot key for auth; Demo Lab admin-only + DEMO_MODE
+- Next step: Phase 4 polish
 

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Demo Lab · AgentWarden{% endblock %}
+{% block page_title %}Demo Lab{% endblock %}
+{% block content %}
+<p class="text-sm text-slate-500 mb-6">Control panel for live demos. Each button calls the real API as a simulated agent.</p>
+
+<div class="grid md:grid-cols-2 gap-4" x-data="demoLab()">
+  {% set buttons = [
+    ('small', '1. Small refund (allowed)', 'Refund of 40 — auto-allowed'),
+    ('large', '2. Large refund (needs approval)', 'Refund of 900 — goes pending'),
+    ('leak', '3. Leak customer data (denied)', 'External PII email — denied'),
+    ('burst', '4. Burst of calls (rate limit)', '12 fast calls — later ones denied'),
+    ('overdue', '5. Make approval overdue', 'Pending with 45s SLA for live escalation'),
+    ('self', '6. Try self-approval (blocked)', 'Owner attempts approve — blocked'),
+    ('tamper', '7. Tamper with the ledger', 'Edit one row — then click Verify on Ledger'),
+    ('repair', '8. Repair demo / Reset tamper', 'Restore the tampered ledger row'),
+  ] %}
+  {% for key, title, desc in buttons %}
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+    <h3 class="font-semibold text-sm mb-1">{{ title }}</h3>
+    <p class="text-xs text-slate-500 mb-3">{{ desc }}</p>
+    <button type="button" @click="run('{{ key }}')"
+            class="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
+            :disabled="busy">Run</button>
+    <pre class="mt-3 text-xs font-mono bg-slate-50 dark:bg-slate-800 rounded-lg p-3 min-h-[3rem] whitespace-pre-wrap" x-text="results['{{ key }}'] || ''"></pre>
+  </div>
+  {% endfor %}
+
+  <div class="md:col-span-2 rounded-2xl border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/20 p-5">
+    <h3 class="font-semibold text-sm mb-1">9. Run full demo story</h3>
+    <p class="text-xs text-slate-600 dark:text-slate-300 mb-3">Scenarios 1–3 with short pauses so the feed and overview update live.</p>
+    <button type="button" @click="runStory()" class="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700" :disabled="busy">Run guided story</button>
+    <pre class="mt-3 text-xs font-mono bg-white dark:bg-slate-900 rounded-lg p-3 min-h-[3rem] whitespace-pre-wrap" x-text="results['story'] || ''"></pre>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function demoLab() {
+  return {
+    busy: false,
+    results: {},
+    async run(key) {
+      this.busy = true;
+      this.results[key] = 'Running…';
+      try {
+        const r = await fetch('/demo-lab/run/' + key, {
+          method: 'POST',
+          headers: {
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            'Content-Type': 'application/json',
+          },
+        });
+        const data = await r.json();
+        this.results[key] = JSON.stringify(data, null, 2);
+      } catch (e) {
+        this.results[key] = String(e);
+      }
+      this.busy = false;
+    },
+    async runStory() {
+      this.busy = true;
+      this.results['story'] = '';
+      for (const key of ['small', 'large', 'leak']) {
+        this.results['story'] += '→ ' + key + '…\n';
+        await this.run(key);
+        this.results['story'] += this.results[key] + '\n\n';
+        await new Promise(r => setTimeout(r, 1500));
+      }
+      this.results['story'] += 'Done. Check Live Feed and Overview.';
+      this.busy = false;
+    }
+  }
+}
+</script>
+{% endblock %}

@@ -1,9 +1,10 @@
-.PHONY: setup run test lint seed demo verify docker-up docker-down clean help
+.PHONY: setup run test lint seed demo verify docker-up docker-down clean help bootstrap
 
 PYTHON ?= python3
 PIP ?= pip3
 VENV ?= .venv
 BIN := $(VENV)/bin
+export PYTHONPATH := .
 
 help:
 	@echo "AgentWarden Makefile targets:"
@@ -11,8 +12,9 @@ help:
 	@echo "  make run        - start the FastAPI server"
 	@echo "  make test       - run pytest"
 	@echo "  make lint       - run ruff"
-	@echo "  make seed       - seed demo data (Phase 3)"
-	@echo "  make demo       - run terminal demo agent (Phase 3)"
+	@echo "  make bootstrap  - create demo users only"
+	@echo "  make seed       - seed full demo data"
+	@echo "  make demo       - run terminal demo agent"
 	@echo "  make verify     - end-to-end smoke test against running server"
 	@echo "  make docker-up  - start app + Postgres via docker-compose"
 	@echo "  make docker-down- stop docker-compose services"
@@ -35,17 +37,17 @@ lint:
 	$(BIN)/ruff check app tests scripts sdk
 	$(BIN)/ruff format --check app tests scripts sdk
 
+bootstrap:
+	$(PYTHON) scripts/bootstrap_admin.py
+
 seed:
-	@echo "Seed script arrives in Phase 3"
-	@exit 1
+	$(PYTHON) scripts/seed.py
 
 demo:
-	@echo "Demo agent arrives in Phase 3"
-	@exit 1
+	$(PYTHON) scripts/demo_agent.py
 
 verify:
-	@echo "Smoke test arrives in Phase 3"
-	@exit 1
+	$(PYTHON) scripts/smoke_test.py
 
 docker-up:
 	docker compose up --build -d
@@ -55,5 +57,5 @@ docker-down:
 
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache .coverage htmlcov
-	rm -f agentwarden.db *.db
+	rm -f agentwarden.db *.db .tamper_backup.json
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

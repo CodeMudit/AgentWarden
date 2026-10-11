@@ -886,3 +886,120 @@ def web_unfreeze(
         unfreeze_system(db, by=str(user.id))
         db.commit()
     return RedirectResponse("/agents?toast=System+unfrozen", status_code=303)
+
+
+# ---------- Demo Lab (DEMO_MODE + admin) ----------
+
+
+@router.get("/demo-lab", response_class=HTMLResponse)
+def demo_lab_page(
+    request: Request, db: Session = Depends(get_db), user: User = Depends(require_web_user)
+):
+    settings = get_settings()
+    if not settings.demo_mode or user.role != "admin":
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "demo_lab.html", _ctx(request, db))
+
+
+@router.post("/demo-lab/run/{scenario}")
+def demo_lab_run(
+    scenario: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    settings = get_settings()
+    if not settings.demo_mode or user.role != "admin":
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    # CSRF via header
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+
+    from app.services import actions as actions_svc
+    from app.services.approvals import ApprovalError, approve
+    from scripts.tamper import repair, tamper
+
+    refund = db.execute(select(Agent).where(Agent.name == "refund-bot")).scalar_one_or_none()
+    if refund is None:
+        return JSONResponse({"error": "refund-bot not found – run seed"}, status_code=400)
+
+    if scenario == "small":
+        ar = actions_svc.request_action(
+            db, agent=refund, tool="issue_refund", params={"amount": 40}, sensitivity="internal"
+        )
+        db.commit()
+        return {"id": ar.id, "decision": ar.decision, "status": ar.status, "reason": ar.reason}
+
+    if scenario == "large":
+        ar = actions_svc.request_action(
+            db, agent=refund, tool="issue_refund", params={"amount": 900}, sensitivity="internal"
+        )
+        db.commit()
+        return {
+            "id": ar.id,
+            "decision": ar.decision,
+            "status": ar.status,
+            "message": "Go to Approvals as reviewer_b to approve",
+        }
+
+    if scenario == "leak":
+        ar = actions_svc.request_action(
+            db,
+            agent=refund,
+            tool="send_email",
+            params={"to": "evil@gmail.com", "subject": "Customer Export"},
+            sensitivity="pii",
+        )
+        db.commit()
+        return {"id": ar.id, "decision": ar.decision, "status": ar.status, "rule": ar.matched_rule_id}
+
+    if scenario == "burst":
+        results = []
+        for i in range(12):
+            ar = actions_svc.request_action(
+                db, agent=refund, tool="issue_refund", params={"amount": 5}, sensitivity="internal"
+            )
+            results.append({"id": ar.id, "decision": ar.decision})
+        db.commit()
+        return {"results": results}
+
+    if scenario == "overdue":
+        ar = actions_svc.request_action(
+            db,
+            agent=refund,
+            tool="issue_refund",
+            params={"amount": 250},
+            sensitivity="internal",
+            sla_override_seconds=45,
+        )
+        db.commit()
+        return {
+            "id": ar.id,
+            "decision": ar.decision,
+            "status": ar.status,
+            "sla_deadline": ar.sla_deadline.isoformat() if ar.sla_deadline else None,
+            "message": "Watch Approvals escalated tab in ~45s",
+        }
+
+    if scenario == "self":
+        ar = actions_svc.request_action(
+            db, agent=refund, tool="issue_refund", params={"amount": 400}, sensitivity="internal"
+        )
+        db.commit()
+        owner = db.execute(select(User).where(User.id == refund.owner_user_id)).scalar_one()
+        try:
+            approve(db, ar.id, owner, "Trying to self-approve as owner which should fail")
+            db.commit()
+            return {"error": "unexpected success"}
+        except ApprovalError as e:
+            db.rollback()
+            return {"blocked": True, "code": e.code, "message": e.message, "action_id": ar.id}
+
+    if scenario == "tamper":
+        tamper()
+        return {"message": "Ledger row tampered. Go to Ledger and click Verify."}
+
+    if scenario == "repair":
+        repair()
+        return {"message": "Tamper repaired. Verify should PASS again."}
+
+    return JSONResponse({"error": f"unknown scenario {scenario}"}, status_code=400)
