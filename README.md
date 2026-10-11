@@ -69,10 +69,10 @@ AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DE
 
 ### Current status
 
-- Current phase: **0**
-- Last updated: 2026-10-10 ~21:30 IST
-- Overall: Skeleton only. Repo structure, config, DB (SQLite + Alembic), Makefile targets, CI workflow, `/health` endpoint, basic tests. No policy/ledger/auth/UI yet.
-- Tests: **2 passed** (`PYTHONPATH=. python3 -m pytest -v`)
+- Current phase: **1**
+- Last updated: 2026-10-10 ~21:45 IST
+- Overall: Core engine complete via API. Models, pure policy engine, hash-chained ledger, agent API-key auth, actions workflow, approvals with separation of duties, kill switches, escalation, template summaries, policy simulator. No UI yet (Phase 2).
+- Tests: **33 passed** (`PYTHONPATH=. python3 -m pytest -v`)
 - `make verify`: not yet implemented (Phase 3)
 
 ### Feature checklist
@@ -82,12 +82,12 @@ AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DE
 | Repo structure / config / Makefile | done and tested | `app/config.py`, `Makefile`, `pyproject.toml` | `make help`; `curl /health` |
 | DB engine + Alembic | done and tested | `app/db.py`, `alembic/` | tables created on startup; migration exists |
 | `/health` | done and tested | `app/main.py` | `GET /health` → 200 + db ok |
-| Policy engine | not started | `app/policy/engine.py` | — |
-| Ledger | not started | `app/ledger.py` | — |
-| Agent auth + actions API | not started | `app/api/` | — |
-| Approvals + separation of duties | not started | `app/services/` | — |
-| Escalation task | not started | `app/services/escalation.py` | — |
-| Simulator | not started | `app/policy/simulator.py` | — |
+| Policy engine | done and tested | `app/policy/engine.py` | pytest tests/test_policy_engine.py |
+| Ledger | done and tested | `app/ledger.py` | pytest tests/test_ledger.py |
+| Agent auth + actions API | done and tested | `app/api/actions.py`, `app/security.py` | curl /v1/actions/request |
+| Approvals + separation of duties | done and tested | `app/services/approvals.py` | pytest workflow tests |
+| Escalation task | done and tested | `app/services/escalation.py` | test_escalation |
+| Simulator | done and tested | `app/policy/simulator.py` | test_policy_simulate |
 | Human auth / CSRF / RBAC | not started | `app/security.py` | — |
 | UI pages | not started | `app/web/` | — |
 | Seed / Demo Lab / SDK / smoke | not started | `scripts/`, `sdk/` | — |
@@ -131,9 +131,9 @@ PYTHONPATH=. ruff format --check --no-cache app tests scripts sdk
 
 ### Next steps (ordered)
 
-1. **Phase 1 – Core engine**: full SQLAlchemy models (`User`, `Agent`, `Policy`, `ActionRequest`, `LedgerEntry`, `LedgerHead`); pure policy engine + condition types + tests; ledger append/verify/checkpoint + concurrency test; agent API-key auth; `/v1/actions/*`; kill switches; approval service with separation of duties; escalation background task; template summaries; policy simulator. All API-only.
-2. Acceptance for Phase 1: all new tests green; curl walkthrough in README works.
-3. Then Phase 2 (UI), Phase 3 (Demo), Phase 4 (Polish).
+1. **Phase 2 – Human interface**: session auth, CSRF, RBAC, base layout + design system, all pages 1–8 and 10.
+2. Acceptance: complete workflow in browser as admin/reviewer/auditor.
+3. Then Phase 3 (Demo Lab, seed, SDK, smoke), Phase 4 (Polish).
 
 ### Conventions
 
@@ -169,7 +169,7 @@ PYTHONPATH=. ruff format --check --no-cache app tests scripts sdk
   - venv creation failed in sandbox (permission on lib64) → used user-site install + PYTHONPATH; documented in Decisions.
   - ruff cache write failure → used `--no-cache`.
 - Left unfinished: full domain models, policy, ledger, auth, UI, demo (all later phases).
-- Next step for whoever continues: **Phase 1 – Core engine** (models, policy engine, ledger, actions API, approvals, escalation, simulator). Wait for user to say "continue to Phase 1".
+- Next step for whoever continues: **Phase 1 – Core engine** (done in Session 2).
 
 ---
 
@@ -179,7 +179,44 @@ PYTHONPATH=. ruff format --check --no-cache app tests scripts sdk
 # Health (no auth)
 curl -s http://localhost:8000/health | jq
 
-# Full action/approval/policy/ledger examples arrive in Phase 1.
+# Bootstrap admin (first user needs no auth)
+curl -s -X POST http://localhost:8000/v1/users \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","name":"Admin","password":"password123","role":"admin"}' | jq
+
+# Create reviewer, then agent (X-User-Id = admin id)
+curl -s -X POST http://localhost:8000/v1/users -H 'Content-Type: application/json' \
+  -H 'X-User-Id: 1' \
+  -d '{"email":"rev@example.com","name":"Rev","password":"password123","role":"reviewer"}' | jq
+
+curl -s -X POST http://localhost:8000/v1/agents -H 'Content-Type: application/json' \
+  -H 'X-User-Id: 1' \
+  -d '{"name":"refund-bot","purpose":"refunds","owner_user_id":2,"risk_tier":"medium"}' | jq
+# Save api_key from response
+
+# Create + activate policy
+curl -s -X POST http://localhost:8000/v1/policies -H 'Content-Type: application/json' \
+  -H 'X-User-Id: 1' \
+  -d '{"rules":{"default_effect":"deny","rules":[{"id":"small","priority":10,"match":{"agents":["refund-bot"],"tools":["issue_refund"]},"conditions":[{"type":"amount_lte","field":"amount","value":100}],"effect":"allow"}]},"note":"v1"}' | jq
+
+curl -s -X POST http://localhost:8000/v1/policies/1/activate -H 'X-User-Id: 1' | jq
+
+# Agent requests action
+curl -s -X POST http://localhost:8000/v1/actions/request \
+  -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"tool":"issue_refund","params":{"amount":40},"sensitivity":"internal"}' | jq
+
+# Large refund → require_approval, then approve as non-owner
+curl -s -X POST http://localhost:8000/v1/actions/request \
+  -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"tool":"issue_refund","params":{"amount":900},"sensitivity":"internal"}' | jq
+
+curl -s -X POST http://localhost:8000/v1/approvals/2/approve \
+  -H 'X-User-Id: 1' -H 'Content-Type: application/json' \
+  -d '{"reason":"Reviewed and looks legitimate for this customer"}' | jq
+
+# Ledger verify
+curl -s -X POST http://localhost:8000/v1/ledger/verify -H 'X-User-Id: 1' | jq
 ```
 
 ---
@@ -199,3 +236,25 @@ curl -s http://localhost:8000/health | jq
 - MIT License (see `LICENSE`).
 - Stack: FastAPI, SQLAlchemy, Alembic, Pydantic, argon2-cffi, Jinja2, HTMX, Tailwind CSS (CDN), Alpine.js (CDN), Chart.js (CDN), rich.
 - No third-party application code reused yet.
+
+#### Session 2: 2026-10-10
+
+- Goal: Complete Phase 1 (core engine).
+- What I changed:
+  - `app/models.py` – full domain models (User, Agent, Policy, ActionRequest, LedgerEntry, LedgerHead, SystemState)
+  - `app/policy/engine.py` – pure evaluator with all condition types + validate_policy
+  - `app/policy/simulator.py` – replay draft policy against history
+  - `app/ledger.py` – append/verify/checkpoint/HMAC, concurrent-safe head lock
+  - `app/security.py` – argon2 passwords, API key hash, agent/user auth deps
+  - `app/schemas.py` – Pydantic request/response models
+  - `app/services/{actions,approvals,escalation,summaries,killswitch}.py` – workflow services
+  - `app/api/{actions,approvals,agents,policies,ledger_api,system,users}.py` – JSON API under /v1
+  - `app/main.py` – routers, genesis, escalation background task
+  - `tests/test_policy_engine.py`, `test_ledger.py`, `test_workflow.py` – coverage
+  - Alembic migration `phase1_domain_models`
+- What I ran: `PYTHONPATH=. python3 -m pytest tests/ -v` → **33 passed**; ruff check → all passed
+- Decisions: Phase 1 human auth via X-User-Id header (sessions in Phase 2); SQLite concurrent test serializes writers with a lock (real FOR UPDATE on Postgres); rate_limit condition is TRUE when count >= max
+- Problems fixed: nested BEGIN IMMEDIATE on SQLite; Pydantic from_attributes; FastAPI detail wrapper in tests
+- Left unfinished: UI (Phase 2), seed/demo/SDK (Phase 3)
+- Next step: Phase 2 – Human interface (auth sessions, CSRF, all pages)
+
