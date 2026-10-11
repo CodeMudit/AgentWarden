@@ -25,7 +25,9 @@ def tamper() -> None:
     db = SessionLocal()
     try:
         entries = list(
-            db.execute(select(LedgerEntry).order_by(LedgerEntry.seq.desc()).limit(20)).scalars().all()
+            db.execute(select(LedgerEntry).order_by(LedgerEntry.seq.desc()).limit(20))
+            .scalars()
+            .all()
         )
         target = None
         for e in entries:
@@ -63,7 +65,9 @@ def repair() -> None:
     init_db()
     db = SessionLocal()
     try:
-        e = db.execute(select(LedgerEntry).where(LedgerEntry.seq == data["seq"])).scalar_one_or_none()
+        e = db.execute(
+            select(LedgerEntry).where(LedgerEntry.seq == data["seq"])
+        ).scalar_one_or_none()
         if e is None:
             print("Entry not found")
             return

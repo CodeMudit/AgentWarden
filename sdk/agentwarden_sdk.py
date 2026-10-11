@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -81,7 +83,9 @@ class AgentWarden:
             if st in ("allowed", "approved"):
                 return status
             if st in ("denied", "rejected"):
-                raise ActionDenied(action_id, status.get("decision_reason") or status.get("reason") or "denied")
+                raise ActionDenied(
+                    action_id, status.get("decision_reason") or status.get("reason") or "denied"
+                )
             if st == "escalated":
                 # still waiting for admin decision
                 pass
@@ -134,7 +138,9 @@ def governed(
             params = {k: v for k, v in kwargs.items() if not k.startswith("_")}
             # also map positional via fn annotations lightly – pass kwargs-style only for simplicity
             try:
-                decision = warden.request(tool=tool, params=params or dict(kwargs), sensitivity=sensitivity)
+                decision = warden.request(
+                    tool=tool, params=params or dict(kwargs), sensitivity=sensitivity
+                )
                 action_id = decision["id"]
                 if decision.get("decision") == "deny":
                     raise ActionDenied(action_id, decision.get("reason") or "denied")
@@ -143,7 +149,11 @@ def governed(
                     if status.get("status") in ("denied", "rejected"):
                         raise ActionDenied(action_id, status.get("decision_reason") or "rejected")
                 result = fn(*args, **kwargs)
-                warden.complete(action_id, success=True, result=result if isinstance(result, dict) else {"value": result})
+                warden.complete(
+                    action_id,
+                    success=True,
+                    result=result if isinstance(result, dict) else {"value": result},
+                )
                 return result
             except ActionDenied:
                 raise
@@ -151,10 +161,8 @@ def governed(
                 raise
             except Exception as e:
                 if "action_id" in locals():
-                    try:
+                    with contextlib.suppress(Exception):
                         warden.complete(action_id, success=False, result={"error": str(e)})
-                    except Exception:
-                        pass
                 raise
             finally:
                 if own_client and warden:

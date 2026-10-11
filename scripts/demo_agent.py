@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -68,7 +67,9 @@ def main() -> None:
             json={"tool": "issue_refund", "params": {"amount": 40}, "sensitivity": "internal"},
         )
         data = r.json()
-        console.print(f"  decision=[green]{data.get('decision')}[/green] rule={data.get('matched_rule_id')}")
+        console.print(
+            f"  decision=[green]{data.get('decision')}[/green] rule={data.get('matched_rule_id')}"
+        )
 
     def large_refund():
         r = httpx.post(
@@ -90,7 +91,9 @@ def main() -> None:
             },
         )
         data = r.json()
-        console.print(f"  decision=[red]{data.get('decision')}[/red] rule={data.get('matched_rule_id')}")
+        console.print(
+            f"  decision=[red]{data.get('decision')}[/red] rule={data.get('matched_rule_id')}"
+        )
 
     def burst():
         decisions = []

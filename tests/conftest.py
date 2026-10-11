@@ -5,26 +5,40 @@ from __future__ import annotations
 import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
-os.environ["SECRET_KEY"] = "test-secret-key-for-pytest"
-os.environ["LEDGER_CHECKPOINT_KEY"] = "test-ledger-hmac-key"
+os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-not-default"
+os.environ["LEDGER_CHECKPOINT_KEY"] = "test-ledger-hmac-key-ok"
 os.environ["DEMO_MODE"] = "true"
 os.environ["APPROVAL_SLA_SECONDS"] = "900"
+os.environ["DEBUG"] = "true"
 
-# Clear settings before imports that use them
 from app.config import get_settings
 
 get_settings.cache_clear()
 
+from contextlib import asynccontextmanager
+
 import pytest
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import ledger
+from app import __version__, ledger
+from app.api import actions, agents, approvals, ledger_api, policies, system, users
 from app.db import Base, get_db
 from app.models import User
-from app.security import generate_api_key, hash_password
+from app.security import (
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    RedirectToLogin,
+    create_session_token,
+    generate_api_key,
+    generate_csrf_token,
+    hash_password,
+)
+from app.web import routes as web_routes
 
 
 @pytest.fixture()
@@ -59,7 +73,6 @@ def db(db_engine):
 
 @pytest.fixture()
 def client(db_engine, db):
-    """TestClient wired to the same in-memory engine as `db` fixture."""
     Session = sessionmaker(bind=db_engine, autocommit=False, autoflush=False)
 
     def _override_get_db():
@@ -73,17 +86,6 @@ def client(db_engine, db):
         finally:
             session.close()
 
-    # Import create_app late; disable lifespan side-effects by building app
-    # without starting escalation against global engine.
-    from contextlib import asynccontextmanager
-
-    from fastapi import FastAPI
-    from fastapi.responses import JSONResponse
-
-    from app import __version__
-    from app.api import actions, agents, approvals, ledger_api, policies, system, users
-    from app.config import get_settings
-
     settings = get_settings()
 
     @asynccontextmanager
@@ -91,6 +93,10 @@ def client(db_engine, db):
         yield
 
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=_noop_lifespan)
+
+    @app.exception_handler(RedirectToLogin)
+    async def _redir(request, exc):
+        return RedirectResponse("/login", status_code=303)
 
     @app.get("/health")
     def health():
@@ -111,11 +117,20 @@ def client(db_engine, db):
     app.include_router(ledger_api.router, prefix="/v1")
     app.include_router(system.router, prefix="/v1")
     app.include_router(users.router, prefix="/v1")
+    app.include_router(web_routes.router)
     app.dependency_overrides[get_db] = _override_get_db
 
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+def login_as(client: TestClient, user: User) -> None:
+    """Set a valid session cookie for the given user (bypasses HTML login form)."""
+    token = create_session_token(user.id)
+    client.cookies.set(SESSION_COOKIE, token)
+    csrf = generate_csrf_token()
+    client.cookies.set(CSRF_COOKIE, csrf)
 
 
 @pytest.fixture()

@@ -84,7 +84,9 @@ def main() -> int:
         sens = "pii" if block.name == "send_email" else "internal"
         try:
             decision = warden.request(block.name, dict(block.input), sensitivity=sens)
-            print(f"  AgentWarden decision={decision.get('decision')} reason={decision.get('reason')}")
+            print(
+                f"  AgentWarden decision={decision.get('decision')} reason={decision.get('reason')}"
+            )
             if decision.get("decision") == "deny":
                 print("  Tool NOT executed")
                 continue

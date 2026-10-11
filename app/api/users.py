@@ -1,10 +1,8 @@
-"""Minimal user bootstrap for Phase 1 tests (full auth UI in Phase 2)."""
+"""User management. Bootstrap is script-only (scripts/seed.py / bootstrap_admin.py)."""
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,29 +18,9 @@ router = APIRouter(prefix="/users", tags=["users"])
 def create_user(
     body: UserCreateIn,
     db: Session = Depends(get_db),
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
+    admin: User = Depends(require_admin),
 ):
-    existing_users = list(db.execute(select(User)).scalars().all())
-    if existing_users:
-        if not x_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": {"code": "unauthorized", "message": "X-User-Id required"}},
-            )
-        try:
-            uid = int(x_user_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=401,
-                detail={"error": {"code": "unauthorized", "message": "bad id"}},
-            )
-        admin = db.execute(select(User).where(User.id == uid)).scalar_one_or_none()
-        if admin is None or admin.role != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": {"code": "forbidden", "message": "admin required"}},
-            )
-
+    """Create a user. Requires an authenticated admin session. No open bootstrap."""
     if body.role not in ("admin", "reviewer", "auditor"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -74,7 +52,7 @@ def create_user(
 
 @router.get("", response_model=list[UserOut])
 def list_users(
-    user: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     rows = list(db.execute(select(User).order_by(User.id)).scalars().all())

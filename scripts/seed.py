@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Ensure repo root on path
@@ -196,6 +196,7 @@ def seed_policy(db, admin: User) -> Policy:
 def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -> None:
     """Generate realistic historical requests through the real service layer."""
     from sqlalchemy import func as sqla_func
+
     existing = db.execute(sqla_func.count(ActionRequest.id)).scalar() or 0
     if existing > 10:
         console.print(f"[dim]History already present ({existing} actions), skipping[/dim]")
@@ -203,7 +204,7 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
 
     refund_bot = agents["refund-bot"][0]
     email_bot = agents["email-assistant"][0]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rng = random.Random(42)
 
     scenarios = []
@@ -212,10 +213,26 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
         ts = now - timedelta(hours=rng.randint(1, 168), minutes=rng.randint(0, 59))
         if roll < 0.45:
             amount = rng.choice([10, 25, 40, 50, 75, 90, 100])
-            scenarios.append((refund_bot, "issue_refund", {"amount": amount, "order_id": f"ORD-{1000+i}"}, "internal", ts))
+            scenarios.append(
+                (
+                    refund_bot,
+                    "issue_refund",
+                    {"amount": amount, "order_id": f"ORD-{1000 + i}"},
+                    "internal",
+                    ts,
+                )
+            )
         elif roll < 0.65:
             amount = rng.choice([150, 200, 350, 500, 900, 1200])
-            scenarios.append((refund_bot, "issue_refund", {"amount": amount, "order_id": f"ORD-{2000+i}"}, "internal", ts))
+            scenarios.append(
+                (
+                    refund_bot,
+                    "issue_refund",
+                    {"amount": amount, "order_id": f"ORD-{2000 + i}"},
+                    "internal",
+                    ts,
+                )
+            )
         elif roll < 0.80:
             scenarios.append(
                 (
@@ -240,8 +257,8 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
     # Sort by time so rate limits and chronology make sense
     scenarios.sort(key=lambda x: x[4])
 
-    from app.services.approvals import approve, reject
     from app.models import User as UserModel
+    from app.services.approvals import approve, reject
 
     reviewer_b = db.execute(
         select(UserModel).where(UserModel.email == "reviewer_b@demo.local")
@@ -284,6 +301,7 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
 
 def func_count_actions(db):
     from sqlalchemy import func
+
     from app.models import ActionRequest
 
     return select(func.count()).select_from(ActionRequest)

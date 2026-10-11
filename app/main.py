@@ -16,7 +16,8 @@ from app import __version__, ledger
 from app.api import actions, agents, approvals, ledger_api, policies, system, users
 from app.config import get_settings
 from app.db import SessionLocal, check_db_connection, init_db
-from app.security import RedirectToLogin
+from app.logging_config import setup_logging
+from app.security import RedirectToLogin, assert_safe_secrets
 from app.services.escalation import start_escalation_task, stop_escalation_task
 from app.web import routes as web_routes
 
@@ -56,6 +57,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    setup_logging(debug=settings.debug)
+    assert_safe_secrets()
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
@@ -94,7 +97,12 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse(
             request,
             "500.html",
-            {"request": request, "current_user": None, "csrf_token": "", "app_version": settings.app_version},
+            {
+                "request": request,
+                "current_user": None,
+                "csrf_token": "",
+                "app_version": settings.app_version,
+            },
             status_code=500,
         )
 
@@ -108,7 +116,12 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse(
             request,
             "404.html",
-            {"request": request, "current_user": None, "csrf_token": "", "app_version": settings.app_version},
+            {
+                "request": request,
+                "current_user": None,
+                "csrf_token": "",
+                "app_version": settings.app_version,
+            },
             status_code=404,
         )
 

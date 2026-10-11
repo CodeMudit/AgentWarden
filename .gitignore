@@ -45,3 +45,6 @@ Thumbs.db
 # Secrets / local
 *.pem
 *.key
+*.db-shm
+*.db-wal
+.tamper_backup.json

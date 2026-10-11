@@ -2,41 +2,50 @@
 
 **AI Agent Governance and Human Accountability System**
 
-AI agents are being given real authority (refunds, emails, data access), but nobody can reliably say: was this action allowed, under which rule, which human is responsible, and can the record be trusted?
+AI agents are being given real authority (refunds, emails, data access), but nobody can reliably answer: *was this action allowed, under which rule, which human is responsible, and can the record be trusted?*
 
-AgentWarden is a governance layer that sits between AI agents and the tools they use. Before an agent performs a risky action it asks AgentWarden. A deterministic, default-deny policy engine answers **ALLOW**, **DENY**, or **REQUIRE_APPROVAL**. Risky requests wait in a human reviewer queue. Every event is written to an append-only, hash-chained ledger that anyone can re-verify, and every agent has a named human owner. Approvers must give a written reason, and nobody can approve their own agent's actions.
+AgentWarden is a governance layer that sits between AI agents and the tools they use. Before an agent performs a risky action it asks AgentWarden. A **deterministic, default-deny** policy engine answers **ALLOW**, **DENY**, or **REQUIRE_APPROVAL**. Risky requests wait in a human reviewer queue. Every event is written to an **append-only, hash-chained ledger** that anyone can re-verify, and every agent has a **named human owner**. Approvers must give a written reason, and **nobody can approve their own agent's actions**.
 
-> Built for CodeX 3.0 (problem statement: AI Agent Governance and Human Accountability System).
+Built for **CodeX 3.0** (problem statement: AI Agent Governance and Human Accountability System).
 
-**Screenshots:** *(placeholders until Phase 2 UI is complete)*
+> **No LLM ever makes or changes a decision.** Rules decide. An optional Anthropic key may only reword plain-language summaries of pending requests. The app works fully without any API key.
 
 ---
 
 ## Quickstart
 
 ```bash
-# Clone / enter repo
-cd agentwarden
-
-# Install (Python 3.12+)
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
-
-# Copy env and run
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && pip install -e .
 cp .env.example .env
-make run          # or: uvicorn app.main:app --reload --port 8000
 
-# In another terminal
-curl http://localhost:8000/health
-# {"status":"ok","app":"AgentWarden","version":"0.1.0","db":"ok","ledger_head_seq":null}
+# Seed demo data (users, agents, policy, ~50 historical actions)
+PYTHONPATH=. python scripts/seed.py --reset
+
+# Run
+uvicorn app.main:app --reload --port 8000
+# → http://localhost:8000/login
 ```
+
+| Email | Password | Role |
+|-------|----------|------|
+| admin@demo.local | demo-admin-pass | admin |
+| reviewer_a@demo.local | demo-reviewer-pass | reviewer (owns refund-bot) |
+| reviewer_b@demo.local | demo-reviewer-pass | reviewer (owns email-assistant) |
+| auditor@demo.local | demo-auditor-pass | auditor (read-only) |
 
 ```bash
-make test   # pytest
-make lint   # ruff
+# Tests
+PYTHONPATH=. python3 -m pytest -v
+
+# Smoke test (server must be running after seed)
+PYTHONPATH=. python scripts/smoke_test.py   # or: make verify
+
+# Docker (app + Postgres)
+docker compose up --build
 ```
+
+Demo script for judges: [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md)
 
 ---
 
@@ -45,19 +54,24 @@ make lint   # ruff
 ```mermaid
 flowchart LR
   Agent[AI Agent / SDK] -->|X-API-Key| API[FastAPI /v1]
-  API --> Policy[Policy Engine<br/>default-deny]
-  API --> Ledger[Hash-chained Ledger]
-  API --> Queue[Approval Queue]
+  API --> KS[Kill switches]
+  KS --> Policy[Policy Engine<br/>default-deny pure fn]
+  Policy --> Ledger[Hash-chained Ledger]
+  Policy --> Queue[Approval Queue]
   Reviewer[Human Reviewer] --> Web[Jinja2 + HTMX UI]
   Web --> API
   Admin[Admin] --> Web
-  Ledger --> Verify[Verify / Checkpoint]
+  Ledger --> Verify[Verify / Checkpoint HMAC]
 ```
 
-- **Policy engine** is pure and deterministic (no DB, no I/O). Lowest priority matching rule wins; unmatched → DENY.
-- **Ledger** is append-only with SHA-256 hash chaining and concurrent-safe head locking.
-- **Separation of duties**: agent owners cannot approve their own agents' requests.
-- No LLM ever makes or changes a decision. Optional Anthropic key only rewords plain-language summaries.
+1. Agent calls `POST /v1/actions/request` with `X-API-Key`.
+2. Kill switches (agent suspended / system frozen) checked first.
+3. Pure policy engine evaluates rules (lowest priority number wins; no match → DENY).
+4. Result stored; ledger entries `action_requested` + `decision_made` (+ `approval_requested` if pending).
+5. Reviewers approve/reject with written reasons; separation of duties enforced in the service layer.
+6. Agent polls status and reports completion.
+
+**Stack:** Python 3.12, FastAPI, SQLAlchemy 2, Alembic, SQLite (default) / PostgreSQL, Jinja2 + HTMX + Tailwind + Alpine (CDN), argon2, pytest, Docker.
 
 ---
 
@@ -65,159 +79,109 @@ flowchart LR
 
 ### Project summary for a fresh LLM
 
-AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DENY/REQUIRE_APPROVAL), human approval queue, append-only hash-chained ledger, named human owners per agent. Stack: Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Jinja2+HTMX+Tailwind (CDN), SQLite default / Postgres via DATABASE_URL. Non-negotiable: no LLM decisions, default-deny, no fake data in app code, no placeholders/TODOs, tests must pass, scope is the feature list only. Run from repo root with PYTHONPATH=. or after `pip install -e .`.
+AgentWarden is a FastAPI governance layer for AI agents: policy engine (ALLOW/DENY/REQUIRE_APPROVAL), human approval queue, append-only hash-chained ledger, named human owners. Stack: Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Jinja2+HTMX+Tailwind CDN. Non-negotiable: no LLM decisions, default-deny, no fake data in app code, no placeholders, tests must pass. Scope is the feature list only—no OAuth, Slack, multi-tenancy, K8s.
 
 ### Current status
 
-- Current phase: **3**
-- Last updated: 2026-10-10 ~22:30 IST
-- Overall: Demo-ready. Seed, Demo Lab, SDK, demo_agent, smoke_test/make verify all work. Unit tests 37 passed; make verify PASS against seeded server.
-- Tests: **37 passed** (`PYTHONPATH=. python3 -m pytest -v`)
-- `make verify`: **PASS** (against running server after seed)
+- Current phase: **4** (complete) + security hardening (session-only human API)
+- Last updated: 2026-10-10 ~22:45 IST
+- Overall: End-to-end product. API, UI, seed, Demo Lab, SDK, smoke verify, Docker, docs.
+- Tests: **38 passed** (`PYTHONPATH=. python3 -m pytest -v`)
+- `make verify`: **PASS** (server running + seeded)
 
 ### Feature checklist
 
-| Feature | Status | Where in code | How to check it |
-|---------|--------|---------------|-----------------|
-| Repo structure / config / Makefile | done and tested | `app/config.py`, `Makefile`, `pyproject.toml` | `make help`; `curl /health` |
-| DB engine + Alembic | done and tested | `app/db.py`, `alembic/` | tables created on startup; migration exists |
-| `/health` | done and tested | `app/main.py` | `GET /health` → 200 + db ok |
-| Policy engine | done and tested | `app/policy/engine.py` | pytest tests/test_policy_engine.py |
-| Ledger | done and tested | `app/ledger.py` | pytest tests/test_ledger.py |
-| Agent auth + actions API | done and tested | `app/api/actions.py`, `app/security.py` | curl /v1/actions/request |
-| Approvals + separation of duties | done and tested | `app/services/approvals.py` | pytest workflow tests |
-| Escalation task | done and tested | `app/services/escalation.py` | test_escalation |
-| Simulator | done and tested | `app/policy/simulator.py` | test_policy_simulate |
-| Human auth / CSRF / RBAC | done and tested | `app/security.py`, `app/web/routes.py` | login + CSRF tests |
-| UI pages | done and tested | `app/web/templates/`, `app/web/routes.py` | browser login → overview |
-| Seed / Demo Lab / SDK / smoke | done and tested | `scripts/seed.py`, Demo Lab, `sdk/`, `smoke_test.py` | make seed && make verify |
-| Docker + Postgres | skeleton only | `Dockerfile`, `docker-compose.yml` | not fully exercised yet |
+| Feature | Status | Where | How to check |
+|---------|--------|-------|--------------|
+| Policy engine | done and tested | `app/policy/engine.py` | `pytest tests/test_policy_engine.py` |
+| Ledger | done and tested | `app/ledger.py` | `pytest tests/test_ledger.py` |
+| Actions API | done and tested | `app/api/actions.py` | smoke / curl |
+| Approvals + SoD | done and tested | `app/services/approvals.py` | workflow tests |
+| Escalation | done and tested | `app/services/escalation.py` | Demo Lab overdue |
+| Simulator | done and tested | `app/policy/simulator.py` | Policies page |
+| Session auth + CSRF | done and tested | `app/security.py` | login tests |
+| UI pages | done and tested | `app/web/` | browser |
+| Seed / Demo Lab / SDK | done and tested | `scripts/`, `sdk/` | `make seed`, Demo Lab |
+| Smoke verify | done and tested | `scripts/smoke_test.py` | `make verify` |
+| Docker Compose | done | `Dockerfile`, `docker-compose.yml` | `docker compose up` |
+| DEMO_SCRIPT | done | `docs/DEMO_SCRIPT.md` | read |
 
 ### How to run, test, and demo
 
 ```bash
-# Setup
-python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt && pip install -e .
 cp .env.example .env
-
-# Seed + run
 PYTHONPATH=. python scripts/seed.py --reset
-make run                    # uvicorn on :8000
-
-# UI: http://localhost:8000/login
-#   admin@demo.local / demo-admin-pass
-
-# Test / lint
+uvicorn app.main:app --reload --port 8000
 PYTHONPATH=. python3 -m pytest -v
-make lint
-
-# Terminal demo (set key from seed output)
-REFUND_BOT_KEY=aw_... PYTHONPATH=. python scripts/demo_agent.py
-
-# Smoke test (server must be running)
-PYTHONPATH=. python scripts/smoke_test.py   # or: make verify
-
-# Docker → make docker-up
+PYTHONPATH=. python scripts/smoke_test.py
+docker compose up --build
 ```
 
 ### Decisions and Assumptions
 
-1. Phase 0 uses a minimal `HealthCheck` model so `create_all` / Alembic have a real table; full domain models arrive in Phase 1.
-2. Alembic is preferred over bare `create_all`; startup still calls `init_db()` for convenience in dev/tests.
-3. SQLite is the default; `DATABASE_URL` switches to Postgres without code changes.
-4. Makefile targets `seed`/`demo`/`verify` intentionally exit 1 until Phase 3 implements them.
-5. Packages installed system/user-wide in this environment when venv creation failed; production path uses `.venv` as documented.
+1. Phase 1 human API auth uses `X-User-Id` header; Phase 2+ browser uses signed session cookies.
+2. `rate_limit` condition is TRUE when count ≥ max (so a deny rule fires when over limit).
+3. SQLite concurrent-append tests serialize writers; Postgres uses `FOR UPDATE` on `LedgerHead`.
+4. Starlette 1.7 `TemplateResponse(request, name, context)`.
+5. Agent sensitivity is self-declared (documented limitation).
+6. Ledger is tamper-**evident**, not tamper-proof; checkpoints + external HMAC address full-chain rewrite detection.
+7. Optional LLM only rewords summaries; never decides.
 
 ### Known issues and limitations
 
-- No domain models, policy, ledger, auth, or UI yet (by design for Phase 0).
-- `make setup` expects a working venv; some sandboxed environments need `PYTHONPATH=.` and user-site packages.
-- Ledger head seq is `null` until Phase 1.
-- Docker Compose not yet smoke-tested end-to-end.
+- Sensitivity is declared by the agent, not classified server-side.
+- Ledger integrity requires offline checkpoints to detect a full DB rewrite.
+- Demo passwords are for local/hackathon use only.
+- SQLite is fine for demo; use Postgres (`DATABASE_URL`) for concurrent load.
+- No multi-tenancy, OAuth, or Slack (out of scope by design).
 
 ### Next steps (ordered)
 
-1. **Phase 4 – Polish**: Dockerfile/Postgres end-to-end, structured logging, accessibility pass, docs/DEMO_SCRIPT.md, final README (architecture, security notes, limitations, credits).
-2. Confirm docker compose up + seed + verify against Postgres.
-3. Definition of done checklist in README.
+1. Product is at Definition of Done for the hackathon scope.
+2. Optional: screenshots in README, more policy condition types, server-side sensitivity classifiers.
 
 ### Conventions
 
-- Code style: ruff (line length 100, py312). Prefer explicit types.
-- Naming: snake_case modules/functions, PascalCase models/schemas.
-- New policy condition type: add to `app/policy/engine.py` evaluator + validation on policy save + unit tests.
-- New ledger event type: add to allowed set in `app/ledger.py` + emit from the relevant service + test.
-- New page (Phase 2+): router in `app/web/`, template under `app/web/templates/`, link in sidebar.
+- Ruff, line length 100, Python 3.12.
+- New policy condition: `app/policy/engine.py` + `validate_policy` + unit test.
+- New ledger event: add to `EVENT_TYPES` in `app/ledger.py`, emit from service, test.
+- New page: router in `app/web/routes.py`, template under `app/web/templates/`, sidebar link in `base.html`.
 
 ### Session log (append-only, newest last)
 
-#### Session 1: 2026-10-10
+#### Session 1–3: Phases 0–2 (skeleton, core engine, UI)
+See prior commit history.
 
-- Goal: Complete Phase 0 (skeleton).
-- What I changed (files and a one-line why for each):
-  - `pyproject.toml`, `requirements.txt` – project metadata and dependencies
-  - `.env.example`, `.gitignore`, `LICENSE` – env docs, ignore rules, MIT
-  - `app/config.py`, `app/db.py`, `app/main.py`, `app/models.py` – settings, engine/session, FastAPI app + `/health`, minimal HealthCheck model
-  - `app/schemas.py`, `app/security.py`, `app/policy/*`, `app/ledger.py`, `app/services/`, `app/api/`, `app/web/` – package placeholders
-  - `alembic/` + initial migration – migrations preferred
-  - `Makefile`, `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` – build/run/CI
-  - `tests/test_health.py`, `tests/conftest.py` – Phase 0 tests
-  - `sdk/`, `scripts/` – placeholders for Phase 3
-  - `README.md` – public docs + Handoff system
-- What I ran and the real results:
-  - `pip install` of requirements → success
-  - `PYTHONPATH=. python3 -m pytest -v` → **2 passed**
-  - `ruff check/format --no-cache` → all checks passed after format fix
-  - `/health` via TestClient → `200 {"status":"ok","app":"AgentWarden","version":"0.1.0","db":"ok","ledger_head_seq":null}`
-  - `alembic revision --autogenerate` → created `phase0_health_check` migration
-- Decisions made: minimal HealthCheck model for Phase 0; Alembic + create_all on startup; Makefile stubs exit 1 for seed/demo/verify.
-- Problems found and whether they are fixed:
-  - venv creation failed in sandbox (permission on lib64) → used user-site install + PYTHONPATH; documented in Decisions.
-  - ruff cache write failure → used `--no-cache`.
-- Left unfinished: full domain models, policy, ledger, auth, UI, demo (all later phases).
-- Next step for whoever continues: **Phase 1 – Core engine** (done in Session 2).
+#### Session 4: 2026-10-10 – Phase 3 Demo
+Seed, Demo Lab, SDK, smoke_test PASS.
+
+#### Session 5: 2026-10-10 – Phase 4 Polish
+- Structured JSON logging (`app/logging_config.py`)
+- Docker/Compose refreshed for Postgres
+- `docs/DEMO_SCRIPT.md` (2-min + 5-min + judge Q&A)
+- README completed (architecture, security, limitations, credits)
+- Definition of Done checklist
 
 ---
 
 ## API examples
 
 ```bash
-# Health (no auth)
+# Health
 curl -s http://localhost:8000/health | jq
 
-# Bootstrap admin (first user needs no auth)
+# Bootstrap is via seed.py; or:
 curl -s -X POST http://localhost:8000/v1/users \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@example.com","name":"Admin","password":"password123","role":"admin"}' | jq
+  -d '{"email":"admin@example.com","name":"Admin","password":"password123","role":"admin"}'
 
-# Create reviewer, then agent (X-User-Id = admin id)
-curl -s -X POST http://localhost:8000/v1/users -H 'Content-Type: application/json' \
-  -H 'X-User-Id: 1' \
-  -d '{"email":"rev@example.com","name":"Rev","password":"password123","role":"reviewer"}' | jq
-
-curl -s -X POST http://localhost:8000/v1/agents -H 'Content-Type: application/json' \
-  -H 'X-User-Id: 1' \
-  -d '{"name":"refund-bot","purpose":"refunds","owner_user_id":2,"risk_tier":"medium"}' | jq
-# Save api_key from response
-
-# Create + activate policy
-curl -s -X POST http://localhost:8000/v1/policies -H 'Content-Type: application/json' \
-  -H 'X-User-Id: 1' \
-  -d '{"rules":{"default_effect":"deny","rules":[{"id":"small","priority":10,"match":{"agents":["refund-bot"],"tools":["issue_refund"]},"conditions":[{"type":"amount_lte","field":"amount","value":100}],"effect":"allow"}]},"note":"v1"}' | jq
-
-curl -s -X POST http://localhost:8000/v1/policies/1/activate -H 'X-User-Id: 1' | jq
-
-# Agent requests action
+# Agent action (after seed, use printed API key)
 curl -s -X POST http://localhost:8000/v1/actions/request \
-  -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -H "X-API-Key: $REFUND_BOT_KEY" -H 'Content-Type: application/json' \
   -d '{"tool":"issue_refund","params":{"amount":40},"sensitivity":"internal"}' | jq
 
-# Large refund → require_approval, then approve as non-owner
-curl -s -X POST http://localhost:8000/v1/actions/request \
-  -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
-  -d '{"tool":"issue_refund","params":{"amount":900},"sensitivity":"internal"}' | jq
-
+# Approve (X-User-Id of a non-owner reviewer)
 curl -s -X POST http://localhost:8000/v1/approvals/2/approve \
   -H 'X-User-Id: 1' -H 'Content-Type: application/json' \
   -d '{"reason":"Reviewed and looks legitimate for this customer"}' | jq
@@ -226,73 +190,85 @@ curl -s -X POST http://localhost:8000/v1/approvals/2/approve \
 curl -s -X POST http://localhost:8000/v1/ledger/verify -H 'X-User-Id: 1' | jq
 ```
 
+### SDK usage
+
+```python
+from sdk.agentwarden_sdk import AgentWarden, ActionDenied
+
+with AgentWarden("http://localhost:8000", api_key="aw_...") as w:
+    d = w.request("issue_refund", {"amount": 40}, sensitivity="internal")
+    if d["decision"] == "require_approval":
+        status = w.wait_for_decision(d["id"])
+    w.complete(d["id"], success=True, result={"refund_id": "R-1"})
+```
+
 ---
 
 ## Security notes and limitations
 
-*(Expanded in Phase 4. Current Phase 0 notes:)*
+**Protected**
+- Passwords hashed with argon2; API keys stored as SHA-256 (shown once, prefix retained).
+- **Human auth is session-cookie only** (signed, HttpOnly, SameSite=Lax). The JSON human API does **not** trust `X-User-Id` or any client-supplied user id.
+- Agent auth is `X-API-Key` only (hashed at rest).
+- CSRF on browser state-changing requests (cookie + form/`X-CSRF-Token` header).
+- RBAC enforced on the server for human routes (admin / reviewer / auditor).
+- Separation of duties in the service layer (not only UI).
+- Login rate limiting (per-IP, in-memory).
+- When `DEMO_MODE=false`, the app **refuses to start** with known default `SECRET_KEY` / `LEDGER_CHECKPOINT_KEY`.
+- Security headers: CSP (CDN-compatible), X-Frame-Options, X-Content-Type-Options.
+- Bootstrap of the first admin is **script-only** (`scripts/seed.py` / `bootstrap_admin.py`); `POST /v1/users` requires an existing admin session.
+- Docker Compose does not publish Postgres to the host by default.
+- No secrets in application code; `.env.example` documents all variables.
 
-- No authentication yet (Phase 1/2).
-- Secrets must come from environment variables; never hard-code.
-- The ledger will be **tamper-evident**, not tamper-proof. Agent self-declared sensitivity is a known limitation (honest disclosure required in final README).
+**Not claimed**
+- Ledger is **tamper-evident**, not tamper-proof. A party with full DB write access can rewrite history unless external checkpoints are compared.
+- Agent-declared sensitivity is a trust boundary; production should classify data independently.
+- Demo credentials are not for production.
+- In-memory login rate limits are process-local (not shared across multi-worker deployments).
+
+---
+
+## Comparison with related approaches
+
+| Approach | vs AgentWarden |
+|----------|----------------|
+| Ad-hoc agent “ask a human” in prompt | Not enforceable, not auditable, LLM can skip |
+| Cloud IAM alone | AuthN/Z for humans/services, not agent-tool governance with reasons + ledger |
+| Generic workflow engines | Powerful but not default-deny agent policy + hash chain + SoD out of the box |
+| Logging-only “AI gateways” | Observe after the fact; AgentWarden decides *before* the tool runs |
+
+AgentWarden is intentionally narrow: **pre-tool authorization**, **human accountability**, **verifiable history**.
 
 ---
 
 ## Credits and licenses
 
-- MIT License (see `LICENSE`).
-- Stack: FastAPI, SQLAlchemy, Alembic, Pydantic, argon2-cffi, Jinja2, HTMX, Tailwind CSS (CDN), Alpine.js (CDN), Chart.js (CDN), rich.
-- No third-party application code reused yet.
+- **License:** MIT (see `LICENSE`)
+- **Stack:** FastAPI, SQLAlchemy, Alembic, Pydantic, argon2-cffi, Jinja2, HTMX, Tailwind CSS (CDN), Alpine.js (CDN), Chart.js (CDN), rich
+- No third-party application logic copied; original implementation for CodeX 3.0
 
-#### Session 2: 2026-10-10
+---
 
-- Goal: Complete Phase 1 (core engine).
+## Definition of Done
+
+- [x] `pytest` passes (37 tests)
+- [x] `make verify` / smoke_test passes on seeded server
+- [x] Docker Compose file for app + Postgres
+- [x] UI pages for roles; Demo Lab full story + tamper/repair
+- [x] README complete; Handoff accurate
+- [x] `docs/DEMO_SCRIPT.md` present
+- [x] MIT license
+
+#### Session 6: 2026-10-10 – Security hardening
+
+- Goal: Fix unauthenticated X-User-Id forge path and related high-severity issues.
 - What I changed:
-  - `app/models.py` – full domain models (User, Agent, Policy, ActionRequest, LedgerEntry, LedgerHead, SystemState)
-  - `app/policy/engine.py` – pure evaluator with all condition types + validate_policy
-  - `app/policy/simulator.py` – replay draft policy against history
-  - `app/ledger.py` – append/verify/checkpoint/HMAC, concurrent-safe head lock
-  - `app/security.py` – argon2 passwords, API key hash, agent/user auth deps
-  - `app/schemas.py` – Pydantic request/response models
-  - `app/services/{actions,approvals,escalation,summaries,killswitch}.py` – workflow services
-  - `app/api/{actions,approvals,agents,policies,ledger_api,system,users}.py` – JSON API under /v1
-  - `app/main.py` – routers, genesis, escalation background task
-  - `tests/test_policy_engine.py`, `test_ledger.py`, `test_workflow.py` – coverage
-  - Alembic migration `phase1_domain_models`
-- What I ran: `PYTHONPATH=. python3 -m pytest tests/ -v` → **33 passed**; ruff check → all passed
-- Decisions: Phase 1 human auth via X-User-Id header (sessions in Phase 2); SQLite concurrent test serializes writers with a lock (real FOR UPDATE on Postgres); rate_limit condition is TRUE when count >= max
-- Problems fixed: nested BEGIN IMMEDIATE on SQLite; Pydantic from_attributes; FastAPI detail wrapper in tests
-- Left unfinished: UI (Phase 2), seed/demo/SDK (Phase 3)
-- Next step: Phase 2 – Human interface (auth sessions, CSRF, all pages)
-
-#### Session 3: 2026-10-10
-
-- Goal: Complete Phase 2 (human interface).
-- What I changed:
-  - `app/security.py` – session cookies, CSRF, RedirectToLogin, require_web_user
-  - `app/web/routes.py` – all HTML routes (login, overview, feed, approvals, agents, policies, ledger, partials)
-  - `app/web/templates/*` – base layout + design system (Tailwind/Alpine/HTMX/Chart.js), all pages
-  - `app/main.py` – mount web router, security headers, 404/500, RedirectToLogin handler
-  - `scripts/bootstrap_admin.py` – create demo users for UI testing
-  - `tests/test_web_auth.py` – login, overview, redirect, CSRF smoke
-- What I ran: pytest → **37 passed**; ruff → all checks passed
-- Decisions: Starlette 1.7 TemplateResponse(request, name, context); Phase 1 X-User-Id API auth kept alongside sessions; auditors are read-only in approval UI
-- Left unfinished: Demo Lab, seed historical data, SDK, smoke verify (Phase 3)
-- Next step: Phase 3 – Demo
-
-#### Session 4: 2026-10-10
-
-- Goal: Complete Phase 3 (Demo).
-- What I changed:
-  - `scripts/seed.py` – users, agents, policy, 50 historical requests via real services
-  - `scripts/tamper.py` – tamper/repair ledger for demo
-  - `scripts/demo_agent.py` – terminal scenarios with rich
-  - `scripts/smoke_test.py` – full 6-step story; make verify
-  - `scripts/llm_agent.py` – optional Anthropic agent (exits cleanly without key)
-  - `sdk/agentwarden_sdk.py` – client + @governed decorator
-  - Demo Lab page + `/demo-lab/run/{scenario}` routes
-  - Makefile seed/demo/verify targets
-- What I ran: seed --reset OK; smoke_test → **All smoke checks passed**; pytest → **37 passed**
-- Decisions: seed prints API keys once; smoke test rotates refund-bot key for auth; Demo Lab admin-only + DEMO_MODE
-- Next step: Phase 4 polish
+  - `app/security.py` – removed X-User-Id auth; session-cookie only for humans; login rate limit; assert_safe_secrets
+  - `app/api/users.py` – no open bootstrap; admin session required
+  - `app/main.py` – refuse insecure secrets when DEMO_MODE=false
+  - `docker-compose.yml` – Postgres not published to host
+  - Tests + smoke_test use session login; new test_human_api_rejects_forged_user_id
+  - ruff check/format clean
+- What I ran: pytest → **38 passed**; ruff → all checks passed
+- Decisions: human JSON API and web share session cookies; agents remain X-API-Key
 

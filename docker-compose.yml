@@ -5,10 +5,11 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://agentwarden:agentwarden@db:5432/agentwarden
-      SECRET_KEY: docker-compose-dev-secret-change-in-prod
-      LEDGER_CHECKPOINT_KEY: docker-compose-ledger-key
-      DEMO_MODE: "true"
+      SECRET_KEY: ${SECRET_KEY:-docker-compose-dev-secret-change-in-prod-32ch}
+      LEDGER_CHECKPOINT_KEY: ${LEDGER_CHECKPOINT_KEY:-docker-compose-ledger-hmac-key}
+      DEMO_MODE: ${DEMO_MODE:-true}
       DEBUG: "false"
+      APPROVAL_SLA_SECONDS: "900"
     depends_on:
       db:
         condition: service_healthy
@@ -20,15 +21,17 @@ services:
       POSTGRES_USER: agentwarden
       POSTGRES_PASSWORD: agentwarden
       POSTGRES_DB: agentwarden
-    ports:
-      - "5432:5432"
+    # Not published to the host by default — app reaches db on the compose network only.
+    # Uncomment the next two lines only for local debugging:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agentwarden -d agentwarden"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 8
 
 volumes:
   pgdata:

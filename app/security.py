@@ -1,9 +1,16 @@
-"""Password hashing, API key auth, sessions, CSRF, RBAC dependencies."""
+"""Password hashing, API key auth, sessions, CSRF, RBAC dependencies.
+
+Human JSON API and web UI authenticate via signed session cookies only.
+X-User-Id is NOT accepted — it was a Phase-1 test shortcut and is removed
+because it allowed forging any user's identity without credentials.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import secrets
+import time
+from collections import defaultdict
 from typing import Annotated
 
 from argon2 import PasswordHasher
@@ -19,6 +26,7 @@ from app.models import Agent, User
 
 ph = PasswordHasher()
 
+
 class RedirectToLogin(Exception):
     """Raised when a web route requires auth."""
 
@@ -26,6 +34,32 @@ class RedirectToLogin(Exception):
 SESSION_COOKIE = "aw_session"
 CSRF_COOKIE = "aw_csrf"
 SESSION_MAX_AGE = 60 * 60 * 12  # 12 hours
+
+# Simple in-memory login rate limit: ip -> list of attempt timestamps
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+LOGIN_WINDOW_SECONDS = 60
+LOGIN_MAX_ATTEMPTS = 10
+
+
+def check_login_rate_limit(client_ip: str) -> None:
+    now = time.time()
+    window_start = now - LOGIN_WINDOW_SECONDS
+    attempts = [t for t in _login_attempts[client_ip] if t >= window_start]
+    _login_attempts[client_ip] = attempts
+    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error": {
+                    "code": "rate_limited",
+                    "message": "Too many login attempts. Try again in a minute.",
+                }
+            },
+        )
+
+
+def record_login_attempt(client_ip: str) -> None:
+    _login_attempts[client_ip].append(time.time())
 
 
 def hash_password(password: str) -> str:
@@ -143,49 +177,84 @@ def verify_csrf(request: Request, form_token: str | None = None) -> None:
         )
 
 
-# --- Phase 1 header-based human auth (kept for API tests) ---
+def _user_from_session(request: Request, db: Session) -> User | None:
+    return get_current_user(request, db)
 
 
-def require_user_role(
-    roles: list[str],
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-    db: Session = Depends(get_db),
-) -> User:
-    if not x_user_id:
+def require_session_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """Require an authenticated human session (cookie). Used by JSON human API."""
+    user = _user_from_session(request, db)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "unauthorized", "message": "X-User-Id required"}},
-        )
-    try:
-        uid = int(x_user_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "unauthorized", "message": "Invalid user id"}},
-        ) from None
-    user = get_user_by_id(db, uid)
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "unauthorized", "message": "User not found or inactive"}},
-        )
-    if user.role not in roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": {"code": "forbidden", "message": f"Role {user.role} not in {roles}"}},
+            detail={
+                "error": {
+                    "code": "unauthorized",
+                    "message": "Authentication required. Sign in via /login to obtain a session cookie.",
+                }
+            },
         )
     return user
 
 
-def require_admin(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-    db: Session = Depends(get_db),
-) -> User:
-    return require_user_role(["admin"], x_user_id, db)
+def require_session_role(roles: list[str]):
+    """Dependency factory: session cookie + role check for JSON API."""
+
+    def _dep(request: Request, db: Session = Depends(get_db)) -> User:
+        user = require_session_user(request, db)
+        if user.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "forbidden",
+                        "message": f"Role {user.role} not permitted; need one of {roles}",
+                    }
+                },
+            )
+        return user
+
+    return _dep
 
 
-def require_reviewer_or_admin(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-    db: Session = Depends(get_db),
-) -> User:
-    return require_user_role(["admin", "reviewer"], x_user_id, db)
+# Backwards-compatible names used by API routers (now session-based, not X-User-Id)
+def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
+    return require_session_role(["admin"])(request, db)
+
+
+def require_reviewer_or_admin(request: Request, db: Session = Depends(get_db)) -> User:
+    return require_session_role(["admin", "reviewer"])(request, db)
+
+
+def assert_safe_secrets() -> None:
+    """Refuse to start with known-insecure defaults unless DEMO_MODE is on."""
+    settings = get_settings()
+    if settings.demo_mode:
+        return
+    insecure = []
+    defaults = {
+        "secret_key": {
+            "dev-secret-change-me-in-production-32chars",
+            "change-me-to-a-long-random-string-in-production",
+            "docker-compose-dev-secret-change-in-prod-32ch",
+            "docker-compose-dev-secret-change-in-prod",
+        },
+        "ledger_checkpoint_key": {
+            "dev-ledger-hmac-key-change-me",
+            "change-me-ledger-hmac-key",
+            "docker-compose-ledger-hmac-key",
+            "docker-compose-ledger-key",
+        },
+    }
+    if settings.secret_key in defaults["secret_key"] or len(settings.secret_key) < 24:
+        insecure.append("SECRET_KEY")
+    if (
+        settings.ledger_checkpoint_key in defaults["ledger_checkpoint_key"]
+        or len(settings.ledger_checkpoint_key) < 16
+    ):
+        insecure.append("LEDGER_CHECKPOINT_KEY")
+    if insecure:
+        raise RuntimeError(
+            f"Refusing to start: insecure default(s) for {', '.join(insecure)}. "
+            "Set strong secrets or enable DEMO_MODE=true for local demos only."
+        )

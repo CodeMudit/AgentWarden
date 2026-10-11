@@ -4,15 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.services.escalation import escalate_overdue
+from tests.conftest import login_as
 
 
 def _headers_agent(api_key: str):
     return {"X-API-Key": api_key}
-
-
-def _headers_user(user_id: int):
-    return {"X-User-Id": str(user_id)}
 
 
 def test_health(client):
@@ -66,19 +62,23 @@ def test_require_approval_and_approve(
     action_id = data["id"]
 
     # Owner (reviewer_a) blocked
+    login_as(client, reviewer_a)
     r2 = client.post(
         f"/v1/approvals/{action_id}/approve",
         json={"reason": "I am the owner trying to approve this"},
-        headers=_headers_user(reviewer_a.id),
     )
     assert r2.status_code == 403
-    assert r2.json()["detail"]["error"]["code"] == "separation_of_duties"
+    body = r2.json()
+    assert (
+        body.get("detail", {}).get("error", {}).get("code") == "separation_of_duties"
+        or body.get("error", {}).get("code") == "separation_of_duties"
+    )
 
     # Other reviewer can approve
+    login_as(client, reviewer_b)
     r3 = client.post(
         f"/v1/approvals/{action_id}/approve",
         json={"reason": "Looks legitimate after manual review"},
-        headers=_headers_user(reviewer_b.id),
     )
     assert r3.status_code == 200
     assert r3.json()["status"] == "approved"
@@ -87,7 +87,6 @@ def test_require_approval_and_approve(
     r4 = client.post(
         f"/v1/approvals/{action_id}/approve",
         json={"reason": "Trying to decide again after already decided"},
-        headers=_headers_user(reviewer_b.id),
     )
     assert r4.status_code == 400
 
@@ -109,10 +108,10 @@ def test_reject(client, db, admin_user, reviewer_a, reviewer_b, agent_with_key, 
         headers=_headers_agent(key),
     )
     action_id = r.json()["id"]
+    login_as(client, reviewer_b)
     r2 = client.post(
         f"/v1/approvals/{action_id}/reject",
         json={"reason": "Suspicious amount, rejecting this request"},
-        headers=_headers_user(reviewer_b.id),
     )
     assert r2.status_code == 200
     assert r2.json()["status"] == "rejected"
@@ -128,10 +127,10 @@ def test_approval_reason_min_length(
         headers=_headers_agent(key),
     )
     action_id = r.json()["id"]
+    login_as(client, reviewer_b)
     r2 = client.post(
         f"/v1/approvals/{action_id}/approve",
         json={"reason": "short"},
-        headers=_headers_user(reviewer_b.id),
     )
     assert r2.status_code == 422
 
@@ -153,12 +152,27 @@ def test_invalid_api_key(client):
     assert r.status_code == 401
 
 
+def test_human_api_rejects_forged_user_id(client, db, admin_user, active_policy):
+    """X-User-Id alone must NOT grant access."""
+    r = client.get("/v1/agents", headers={"X-User-Id": str(admin_user.id)})
+    assert r.status_code == 401
+    r2 = client.post(
+        "/v1/agents",
+        headers={"X-User-Id": str(admin_user.id)},
+        json={
+            "name": "forged-bot",
+            "purpose": "evil",
+            "owner_user_id": admin_user.id,
+            "risk_tier": "low",
+        },
+    )
+    assert r2.status_code == 401
+
+
 def test_kill_switch_agent(client, db, admin_user, reviewer_a, agent_with_key, active_policy):
     agent, key = agent_with_key
-    r = client.post(
-        f"/v1/agents/{agent.id}/suspend",
-        headers=_headers_user(admin_user.id),
-    )
+    login_as(client, admin_user)
+    r = client.post(f"/v1/agents/{agent.id}/suspend")
     assert r.status_code == 200
     assert r.json()["status"] == "suspended"
 
@@ -173,11 +187,8 @@ def test_kill_switch_agent(client, db, admin_user, reviewer_a, agent_with_key, a
 
 def test_system_freeze(client, db, admin_user, reviewer_a, agent_with_key, active_policy):
     agent, key = agent_with_key
-    r = client.post(
-        "/v1/system/freeze",
-        json={"note": "maintenance"},
-        headers=_headers_user(admin_user.id),
-    )
+    login_as(client, admin_user)
+    r = client.post("/v1/system/freeze", json={"note": "maintenance"})
     assert r.status_code == 200
     assert r.json()["is_frozen"] is True
 
@@ -189,12 +200,13 @@ def test_system_freeze(client, db, admin_user, reviewer_a, agent_with_key, activ
     assert r2.json()["decision"] == "deny"
     assert "frozen" in (r2.json()["reason"] or "").lower()
 
-    client.post("/v1/system/unfreeze", headers=_headers_user(admin_user.id))
+    client.post("/v1/system/unfreeze")
 
 
 def test_escalation(client, db, admin_user, reviewer_a, agent_with_key, active_policy):
     agent, key = agent_with_key
     from app.services import actions as actions_svc
+    from app.services.escalation import escalate_overdue
 
     ar = actions_svc.request_action(
         db,
@@ -204,7 +216,6 @@ def test_escalation(client, db, admin_user, reviewer_a, agent_with_key, active_p
         sensitivity="internal",
         sla_override_seconds=1,
     )
-    # Force deadline into the past
     ar.sla_deadline = datetime.now(UTC) - timedelta(seconds=10)
     db.commit()
 
@@ -217,21 +228,19 @@ def test_escalation(client, db, admin_user, reviewer_a, agent_with_key, active_p
 def test_rate_limit_via_api(client, db, admin_user, reviewer_a, agent_with_key, active_policy):
     agent, key = agent_with_key
     decisions = []
-    for i in range(7):
+    for _i in range(7):
         r = client.post(
             "/v1/actions/request",
             json={"tool": "issue_refund", "params": {"amount": 5}, "sensitivity": "internal"},
             headers=_headers_agent(key),
         )
         decisions.append(r.json()["decision"])
-    # First few allow (under rate limit of 5), later deny
     assert "allow" in decisions
     assert "deny" in decisions
 
 
 def test_policy_simulate(client, db, admin_user, reviewer_a, agent_with_key, active_policy):
     agent, key = agent_with_key
-    # Generate some history
     for amount in [40, 200, 50]:
         client.post(
             "/v1/actions/request",
@@ -250,11 +259,8 @@ def test_policy_simulate(client, db, admin_user, reviewer_a, agent_with_key, act
             }
         ],
     }
-    r = client.post(
-        "/v1/policies/simulate",
-        json={"rules": draft, "last_n": 20},
-        headers=_headers_user(admin_user.id),
-    )
+    login_as(client, admin_user)
+    r = client.post("/v1/policies/simulate", json={"rules": draft, "last_n": 20})
     assert r.status_code == 200
     data = r.json()
     assert data["total"] >= 1
@@ -268,12 +274,14 @@ def test_ledger_verify_api(client, db, admin_user, reviewer_a, agent_with_key, a
         json={"tool": "issue_refund", "params": {"amount": 10}, "sensitivity": "internal"},
         headers=_headers_agent(key),
     )
-    r = client.post("/v1/ledger/verify", headers=_headers_user(admin_user.id))
+    login_as(client, admin_user)
+    r = client.post("/v1/ledger/verify")
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
 
 def test_create_agent_and_policy(client, db, admin_user, reviewer_a):
+    login_as(client, admin_user)
     r = client.post(
         "/v1/agents",
         json={
@@ -282,23 +290,15 @@ def test_create_agent_and_policy(client, db, admin_user, reviewer_a):
             "owner_user_id": reviewer_a.id,
             "risk_tier": "high",
         },
-        headers=_headers_user(admin_user.id),
     )
     assert r.status_code == 201
     assert "api_key" in r.json()
     assert r.json()["api_key"].startswith("aw_")
 
     rules = {"default_effect": "deny", "rules": []}
-    r2 = client.post(
-        "/v1/policies",
-        json={"rules": rules, "note": "empty"},
-        headers=_headers_user(admin_user.id),
-    )
+    r2 = client.post("/v1/policies", json={"rules": rules, "note": "empty"})
     assert r2.status_code == 201
     pid = r2.json()["id"]
-    r3 = client.post(
-        f"/v1/policies/{pid}/activate",
-        headers=_headers_user(admin_user.id),
-    )
+    r3 = client.post(f"/v1/policies/{pid}/activate")
     assert r3.status_code == 200
     assert r3.json()["is_active"] is True

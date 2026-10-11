@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -22,10 +22,12 @@ from app.policy.simulator import simulate
 from app.security import (
     CSRF_COOKIE,
     SESSION_COOKIE,
+    check_login_rate_limit,
     create_session_token,
     generate_api_key,
     generate_csrf_token,
     get_current_user,
+    record_login_attempt,
     require_web_user,
     verify_csrf,
     verify_password,
@@ -97,7 +99,8 @@ def login_page(request: Request, db: Session = Depends(get_db)):
     # refresh csrf in context
     response.headers.get("set-cookie", "")
     csrf = request.cookies.get(CSRF_COOKIE) or generate_csrf_token()
-    response = templates.TemplateResponse(request, "login.html", {**_ctx(request, db, error=None), "csrf_token": csrf}
+    response = templates.TemplateResponse(
+        request, "login.html", {**_ctx(request, db, error=None), "csrf_token": csrf}
     )
     response.set_cookie(CSRF_COOKIE, csrf, httponly=False, samesite="lax", max_age=60 * 60 * 12)
     return response
@@ -114,13 +117,32 @@ def login_submit(
     try:
         verify_csrf(request, csrf_token)
     except Exception:
-        return templates.TemplateResponse(request, "login.html", _ctx(request, db, error="CSRF validation failed. Refresh and try again."),
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            _ctx(request, db, error="CSRF validation failed. Refresh and try again."),
             status_code=403,
         )
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        check_login_rate_limit(client_ip)
+    except HTTPException as e:
+        msg = (
+            e.detail["error"]["message"]
+            if isinstance(e.detail, dict) and "error" in e.detail
+            else "Too many login attempts"
+        )
+        return templates.TemplateResponse(
+            request, "login.html", _ctx(request, db, error=msg), status_code=429
+        )
+    record_login_attempt(client_ip)
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if user is None or not user.is_active or not verify_password(password, user.password_hash):
         csrf = request.cookies.get(CSRF_COOKIE) or generate_csrf_token()
-        resp = templates.TemplateResponse(request, "login.html", {**_ctx(request, db, error="Invalid email or password."), "csrf_token": csrf},
+        resp = templates.TemplateResponse(
+            request,
+            "login.html",
+            {**_ctx(request, db, error="Invalid email or password."), "csrf_token": csrf},
             status_code=401,
         )
         resp.set_cookie(CSRF_COOKIE, csrf, httponly=False, samesite="lax")
@@ -166,30 +188,52 @@ def logout(request: Request, csrf_token: str = Form(""), db: Session = Depends(g
 
 
 @router.get("/", response_class=HTMLResponse)
-def overview(request: Request, db: Session = Depends(get_db), user: User = Depends(require_web_user)):
+def overview(
+    request: Request, db: Session = Depends(get_db), user: User = Depends(require_web_user)
+):
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    actions_today = db.execute(
-        select(func.count()).select_from(ActionRequest).where(ActionRequest.created_at >= today)
-    ).scalar() or 0
-    allowed = db.execute(
-        select(func.count()).select_from(ActionRequest).where(
-            ActionRequest.status.in_(["allowed", "approved", "completed"])
-        )
-    ).scalar() or 0
-    denied = db.execute(
-        select(func.count()).select_from(ActionRequest).where(
-            ActionRequest.status.in_(["denied", "rejected"])
-        )
-    ).scalar() or 0
-    pending = db.execute(
-        select(func.count()).select_from(ActionRequest).where(ActionRequest.status == "pending")
-    ).scalar() or 0
-    escalated = db.execute(
-        select(func.count()).select_from(ActionRequest).where(ActionRequest.status == "escalated")
-    ).scalar() or 0
-    suspended = db.execute(
-        select(func.count()).select_from(Agent).where(Agent.status == "suspended")
-    ).scalar() or 0
+    actions_today = (
+        db.execute(
+            select(func.count()).select_from(ActionRequest).where(ActionRequest.created_at >= today)
+        ).scalar()
+        or 0
+    )
+    allowed = (
+        db.execute(
+            select(func.count())
+            .select_from(ActionRequest)
+            .where(ActionRequest.status.in_(["allowed", "approved", "completed"]))
+        ).scalar()
+        or 0
+    )
+    denied = (
+        db.execute(
+            select(func.count())
+            .select_from(ActionRequest)
+            .where(ActionRequest.status.in_(["denied", "rejected"]))
+        ).scalar()
+        or 0
+    )
+    pending = (
+        db.execute(
+            select(func.count()).select_from(ActionRequest).where(ActionRequest.status == "pending")
+        ).scalar()
+        or 0
+    )
+    escalated = (
+        db.execute(
+            select(func.count())
+            .select_from(ActionRequest)
+            .where(ActionRequest.status == "escalated")
+        ).scalar()
+        or 0
+    )
+    suspended = (
+        db.execute(
+            select(func.count()).select_from(Agent).where(Agent.status == "suspended")
+        ).scalar()
+        or 0
+    )
 
     # avg approval time
     approved_rows = list(
@@ -198,7 +242,9 @@ def overview(request: Request, db: Session = Depends(get_db), user: User = Depen
                 ActionRequest.decided_at.isnot(None),
                 ActionRequest.created_at.isnot(None),
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     avg_secs = None
     if approved_rows:
@@ -215,12 +261,11 @@ def overview(request: Request, db: Session = Depends(get_db), user: User = Depen
             .where(ActionRequest.status.in_(["pending", "escalated"]))
             .order_by(ActionRequest.created_at.asc())
             .limit(8)
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
-    agent_map = {
-        a.id: a.name
-        for a in db.execute(select(Agent)).scalars().all()
-    }
+    agent_map = {a.id: a.name for a in db.execute(select(Agent)).scalars().all()}
     needs_attention = [
         {
             "id": ar.id,
@@ -245,10 +290,16 @@ def overview(request: Request, db: Session = Depends(get_db), user: User = Depen
                 select(ActionRequest).where(
                     ActionRequest.created_at >= day, ActionRequest.created_at < nxt
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
-        allow_s.append(sum(1 for r in rows if r.decision == "allow" or r.status in ("allowed", "approved")))
-        deny_s.append(sum(1 for r in rows if r.decision == "deny" or r.status in ("denied", "rejected")))
+        allow_s.append(
+            sum(1 for r in rows if r.decision == "allow" or r.status in ("allowed", "approved"))
+        )
+        deny_s.append(
+            sum(1 for r in rows if r.decision == "deny" or r.status in ("denied", "rejected"))
+        )
         pend_s.append(sum(1 for r in rows if r.status in ("pending", "escalated")))
 
     by_agent: dict[str, int] = {}
@@ -257,7 +308,10 @@ def overview(request: Request, db: Session = Depends(get_db), user: User = Depen
         by_agent[name] = by_agent.get(name, 0) + 1
 
     head = ledger.get_head(db)
-    return templates.TemplateResponse(request, "overview.html", _ctx(
+    return templates.TemplateResponse(
+        request,
+        "overview.html",
+        _ctx(
             request,
             db,
             stats={
@@ -273,7 +327,10 @@ def overview(request: Request, db: Session = Depends(get_db), user: User = Depen
             ledger_hash=head["last_hash"],
             ledger_seq=head["last_seq"],
             chart_time={"labels": labels, "allow": allow_s, "deny": deny_s, "pending": pend_s},
-            chart_agent={"labels": list(by_agent.keys()) or ["none"], "values": list(by_agent.values()) or [0]},
+            chart_agent={
+                "labels": list(by_agent.keys()) or ["none"],
+                "values": list(by_agent.values()) or [0],
+            },
         ),
     )
 
@@ -282,7 +339,9 @@ def overview(request: Request, db: Session = Depends(get_db), user: User = Depen
 
 
 @router.get("/feed", response_class=HTMLResponse)
-def feed_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require_web_user)):
+def feed_page(
+    request: Request, db: Session = Depends(get_db), user: User = Depends(require_web_user)
+):
     rows = _feed_rows(db)
     return templates.TemplateResponse(request, "feed.html", _ctx(request, db, rows=rows))
 
@@ -290,7 +349,8 @@ def feed_page(request: Request, db: Session = Depends(get_db), user: User = Depe
 def _feed_rows(db: Session, limit: int = 50) -> list[dict]:
     rows = list(
         db.execute(select(ActionRequest).order_by(ActionRequest.created_at.desc()).limit(limit))
-        .scalars().all()
+        .scalars()
+        .all()
     )
     agents = {a.id: a.name for a in db.execute(select(Agent)).scalars().all()}
     out = []
@@ -316,7 +376,8 @@ def _feed_rows(db: Session, limit: int = 50) -> list[dict]:
 def feed_rows_partial(
     request: Request, db: Session = Depends(get_db), user: User = Depends(require_web_user)
 ):
-    return templates.TemplateResponse(request, "partials/feed_rows.html", _ctx(request, db, rows=_feed_rows(db))
+    return templates.TemplateResponse(
+        request, "partials/feed_rows.html", _ctx(request, db, rows=_feed_rows(db))
     )
 
 
@@ -334,9 +395,13 @@ def action_detail(
     entries = list(
         db.execute(
             select(LedgerEntry)
-            .where(LedgerEntry.subject_type == "action_request", LedgerEntry.subject_id == str(ar.id))
+            .where(
+                LedgerEntry.subject_type == "action_request", LedgerEntry.subject_id == str(ar.id)
+            )
             .order_by(LedgerEntry.seq.asc())
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     timeline = []
     for e in entries:
@@ -358,7 +423,10 @@ def action_detail(
         "policy_version": ar.policy_version,
         "decision_reason": ar.decision_reason,
     }
-    return templates.TemplateResponse(request, "partials/action_detail.html", _ctx(request, db, ar=detail, timeline=timeline),
+    return templates.TemplateResponse(
+        request,
+        "partials/action_detail.html",
+        _ctx(request, db, ar=detail, timeline=timeline),
     )
 
 
@@ -368,7 +436,10 @@ def ledger_badge(
 ):
     result = ledger.verify(db)
     head = ledger.get_head(db)
-    return templates.TemplateResponse(request, "partials/ledger_badge.html", _ctx(
+    return templates.TemplateResponse(
+        request,
+        "partials/ledger_badge.html",
+        _ctx(
             request,
             db,
             ok=result["ok"],
@@ -395,7 +466,9 @@ def approvals_page(
             select(ActionRequest)
             .where(ActionRequest.status == status_filter)
             .order_by(ActionRequest.created_at.asc())
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     agents = {a.id: a for a in db.execute(select(Agent)).scalars().all()}
     now = datetime.now(UTC)
@@ -420,13 +493,24 @@ def approvals_page(
                 "is_owner": agent is not None and agent.owner_user_id == user.id,
             }
         )
-    pending_count = db.execute(
-        select(func.count()).select_from(ActionRequest).where(ActionRequest.status == "pending")
-    ).scalar() or 0
-    escalated_count = db.execute(
-        select(func.count()).select_from(ActionRequest).where(ActionRequest.status == "escalated")
-    ).scalar() or 0
-    return templates.TemplateResponse(request, "approvals.html", _ctx(
+    pending_count = (
+        db.execute(
+            select(func.count()).select_from(ActionRequest).where(ActionRequest.status == "pending")
+        ).scalar()
+        or 0
+    )
+    escalated_count = (
+        db.execute(
+            select(func.count())
+            .select_from(ActionRequest)
+            .where(ActionRequest.status == "escalated")
+        ).scalar()
+        or 0
+    )
+    return templates.TemplateResponse(
+        request,
+        "approvals.html",
+        _ctx(
             request,
             db,
             items=items,
@@ -490,9 +574,14 @@ def agents_page(
     users = {u.id: u for u in db.execute(select(User)).scalars().all()}
     agents = []
     for a in agents_rows:
-        cnt = db.execute(
-            select(func.count()).select_from(ActionRequest).where(ActionRequest.agent_id == a.id)
-        ).scalar() or 0
+        cnt = (
+            db.execute(
+                select(func.count())
+                .select_from(ActionRequest)
+                .where(ActionRequest.agent_id == a.id)
+            ).scalar()
+            or 0
+        )
         owner = users.get(a.owner_user_id)
         agents.append(
             {
@@ -556,7 +645,8 @@ def agent_create(
     )
     db.commit()
     db.refresh(agent)
-    return templates.TemplateResponse(request, "agent_created.html", _ctx(request, db, agent=agent, api_key=full)
+    return templates.TemplateResponse(
+        request, "agent_created.html", _ctx(request, db, agent=agent, api_key=full)
     )
 
 
@@ -613,7 +703,9 @@ def agent_detail(
             .where(ActionRequest.agent_id == agent_id)
             .order_by(ActionRequest.created_at.desc())
             .limit(50)
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     stats = {
         "total": len(actions),
@@ -630,7 +722,10 @@ def agent_detail(
         }
         for a in actions
     ]
-    return templates.TemplateResponse(request, "agent_detail.html", _ctx(request, db, agent=agent, owner=owner, stats=stats, timeline=timeline),
+    return templates.TemplateResponse(
+        request,
+        "agent_detail.html",
+        _ctx(request, db, agent=agent, owner=owner, stats=stats, timeline=timeline),
     )
 
 
@@ -658,7 +753,10 @@ def policies_page(
 ):
     active = db.execute(select(Policy).where(Policy.is_active.is_(True))).scalar_one_or_none()
     versions = list(db.execute(select(Policy).order_by(Policy.version.desc())).scalars().all())
-    return templates.TemplateResponse(request, "policies.html", _ctx(
+    return templates.TemplateResponse(
+        request,
+        "policies.html",
+        _ctx(
             request,
             db,
             active=active,
@@ -689,7 +787,10 @@ async def policy_create(
     except json.JSONDecodeError as e:
         active = db.execute(select(Policy).where(Policy.is_active.is_(True))).scalar_one_or_none()
         versions = list(db.execute(select(Policy).order_by(Policy.version.desc())).scalars().all())
-        return templates.TemplateResponse(request, "policies.html", _ctx(
+        return templates.TemplateResponse(
+            request,
+            "policies.html",
+            _ctx(
                 request,
                 db,
                 active=active,
@@ -703,7 +804,10 @@ async def policy_create(
     if errors:
         active = db.execute(select(Policy).where(Policy.is_active.is_(True))).scalar_one_or_none()
         versions = list(db.execute(select(Policy).order_by(Policy.version.desc())).scalars().all())
-        return templates.TemplateResponse(request, "policies.html", _ctx(
+        return templates.TemplateResponse(
+            request,
+            "policies.html",
+            _ctx(
                 request,
                 db,
                 active=active,
@@ -717,7 +821,10 @@ async def policy_create(
         sim = simulate(db, rules, last_n=50)
         active = db.execute(select(Policy).where(Policy.is_active.is_(True))).scalar_one_or_none()
         versions = list(db.execute(select(Policy).order_by(Policy.version.desc())).scalars().all())
-        return templates.TemplateResponse(request, "policies.html", _ctx(
+        return templates.TemplateResponse(
+            request,
+            "policies.html",
+            _ctx(
                 request,
                 db,
                 active=active,
@@ -799,7 +906,10 @@ def ledger_page(
         }
         for e in entries
     ]
-    return templates.TemplateResponse(request, "ledger.html", _ctx(request, db, entries=entry_dicts, head=head, verify_result=None),
+    return templates.TemplateResponse(
+        request,
+        "ledger.html",
+        _ctx(request, db, entries=entry_dicts, head=head, verify_result=None),
     )
 
 
@@ -828,7 +938,10 @@ def web_ledger_verify(
         }
         for e in entries
     ]
-    return templates.TemplateResponse(request, "ledger.html", _ctx(request, db, entries=entry_dicts, head=head, verify_result=result),
+    return templates.TemplateResponse(
+        request,
+        "ledger.html",
+        _ctx(request, db, entries=entry_dicts, head=head, verify_result=result),
     )
 
 
@@ -950,7 +1063,12 @@ def demo_lab_run(
             sensitivity="pii",
         )
         db.commit()
-        return {"id": ar.id, "decision": ar.decision, "status": ar.status, "rule": ar.matched_rule_id}
+        return {
+            "id": ar.id,
+            "decision": ar.decision,
+            "status": ar.status,
+            "rule": ar.matched_rule_id,
+        }
 
     if scenario == "burst":
         results = []

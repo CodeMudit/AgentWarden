@@ -39,6 +39,7 @@
   {% block head %}{% endblock %}
 </head>
 <body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans antialiased">
+  <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-white focus:px-3 focus:py-2 focus:rounded-lg">Skip to content</a>
   {% if current_user %}
   <div class="min-h-full flex">
     <!-- Sidebar -->
@@ -126,7 +127,7 @@
         </aside>
       </div>
 
-      <main class="flex-1 p-4 sm:p-6">
+      <main id="main-content" class="flex-1 p-4 sm:p-6" tabindex="-1">
         {% if request.query_params.get('toast') %}
         <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show=false, 3500)"
              class="mb-4 rounded-xl border border-allow/30 bg-allow-muted text-allow dark:bg-green-900/30 dark:text-green-300 px-4 py-3 text-sm">

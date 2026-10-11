@@ -3,17 +3,20 @@
 Usage: PYTHONPATH=. python scripts/bootstrap_admin.py
 """
 
+from sqlalchemy import select
+
 from app.db import SessionLocal, init_db
 from app.models import User
 from app.security import hash_password
-from sqlalchemy import select
 
 
 def main() -> None:
     init_db()
     db = SessionLocal()
     try:
-        existing = db.execute(select(User).where(User.email == "admin@demo.local")).scalar_one_or_none()
+        existing = db.execute(
+            select(User).where(User.email == "admin@demo.local")
+        ).scalar_one_or_none()
         if existing:
             print(f"Admin already exists: id={existing.id} email={existing.email}")
             return
