@@ -2,43 +2,135 @@
 {% block title %}Ledger · AgentWarden{% endblock %}
 {% block page_title %}Ledger{% endblock %}
 {% block content %}
-<div class="flex flex-wrap gap-3 mb-5 items-center">
-  <form method="post" action="/ledger/verify">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-    <button class="rounded-xl bg-verified text-white px-4 py-2 text-sm font-medium hover:opacity-90">Verify chain</button>
-  </form>
+<div class="flex flex-wrap gap-3 mb-5 items-center" x-data="ledgerVerify()">
+  <button type="button" @click="runVerify()" :disabled="running"
+          class="rounded-xl bg-verified text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
+    <span x-show="!running">Verify chain</span>
+    <span x-show="running" x-cloak>Verifying…</span>
+  </button>
   <a href="/ledger/export?fmt=json" class="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm">Export JSON</a>
   <a href="/ledger/export?fmt=csv" class="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm">Export CSV</a>
   <form method="post" action="/ledger/checkpoint">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <button class="rounded-xl border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm">Download checkpoint</button>
   </form>
-  {% if verify_result %}
-  <span class="text-sm font-medium px-3 py-1.5 rounded-full {% if verify_result.ok %}bg-allow-muted text-allow{% else %}bg-deny-muted text-deny{% endif %}">
-    {% if verify_result.ok %}PASS · {{ verify_result.checked }} entries{% else %}FAIL at seq {{ verify_result.first_broken_seq }} · {{ verify_result.reason }}{% endif %}
-  </span>
-  {% endif %}
+  <span x-show="result" x-cloak class="text-sm font-medium px-3 py-1.5 rounded-full"
+        :class="result && result.ok ? 'bg-allow-muted text-allow' : 'bg-deny-muted text-deny'"
+        x-text="resultLabel()"></span>
 </div>
 
-<p class="text-xs text-slate-500 mb-3 font-mono">Head: seq={{ head.last_seq }} hash={{ head.last_hash[:16] }}…</p>
+<p class="text-xs text-slate-500 mb-4 font-mono">Head: seq={{ head.last_seq }} · hash={{ head.last_hash[:16] }}…</p>
 
-<div class="space-y-2">
+{# Linked chain visualization #}
+<div class="relative space-y-0" id="ledger-chain">
   {% for e in entries %}
-  <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm {% if verify_result and not verify_result.ok and verify_result.first_broken_seq == e.seq %}ring-2 ring-deny{% endif %}" id="seq-{{ e.seq }}">
-    <div class="flex flex-wrap items-center gap-2 text-sm mb-1">
-      <span class="font-mono font-semibold text-brand-600">#{{ e.seq }}</span>
-      <span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-xs">{{ e.event_type }}</span>
-      <span class="text-xs text-slate-500">{{ e.actor_type }}:{{ e.actor_id or '—' }}</span>
-      <span class="text-xs text-slate-400 ml-auto">{{ e.ts }}</span>
+  <div class="relative flex gap-4 items-stretch" data-seq="{{ e.seq }}">
+    {# vertical connector #}
+    <div class="flex flex-col items-center w-8 shrink-0">
+      {% if not loop.first %}
+      <div class="w-0.5 flex-1 bg-slate-300 dark:bg-slate-600 chain-link" data-link-before="{{ e.seq }}"></div>
+      {% else %}
+      <div class="w-0.5 flex-1 bg-transparent"></div>
+      {% endif %}
+      <div class="w-4 h-4 rounded-full border-2 border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-900 chain-node z-10 transition-all duration-300"
+           data-node="{{ e.seq }}"></div>
+      {% if not loop.last %}
+      <div class="w-0.5 flex-1 bg-slate-300 dark:bg-slate-600 chain-link" data-link-after="{{ e.seq }}"></div>
+      {% else %}
+      <div class="w-0.5 flex-1 bg-transparent"></div>
+      {% endif %}
     </div>
-    <div class="flex flex-wrap gap-3 text-xs font-mono text-slate-500">
-      <span title="{{ e.hash }}">hash {{ e.hash[:12] }}…</span>
-      <span title="{{ e.prev_hash }}">prev {{ e.prev_hash[:12] }}…</span>
-      <button type="button" class="text-brand-600 hover:underline" onclick="navigator.clipboard.writeText('{{ e.hash }}')">copy hash</button>
+    <div class="flex-1 mb-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm chain-block transition-all duration-300"
+         data-block="{{ e.seq }}" id="seq-{{ e.seq }}">
+      <div class="flex flex-wrap items-center gap-2 text-sm mb-1">
+        <span class="font-mono font-semibold text-brand-600">#{{ e.seq }}</span>
+        <span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-xs">{{ e.event_type }}</span>
+        <span class="text-xs text-slate-500">{{ e.actor_type }}:{{ e.actor_id or '—' }}</span>
+        <span class="text-xs text-slate-400 ml-auto">{{ e.ts }}</span>
+      </div>
+      <div class="flex flex-wrap gap-3 text-xs font-mono text-slate-500">
+        <span title="{{ e.hash }}">hash {{ e.hash[:12] }}…</span>
+        <span title="{{ e.prev_hash }}">prev {{ e.prev_hash[:12] }}…</span>
+        <button type="button" class="text-brand-600 hover:underline" onclick="navigator.clipboard.writeText('{{ e.hash }}')">copy</button>
+      </div>
+      <div class="chain-fail-detail hidden mt-2 text-xs text-deny font-mono bg-deny-muted rounded-lg p-2" data-fail-detail="{{ e.seq }}"></div>
     </div>
   </div>
   {% else %}
   <p class="text-sm text-slate-400 py-8 text-center">Ledger is empty</p>
   {% endfor %}
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+function ledgerVerify() {
+  return {
+    running: false,
+    result: null,
+    resultLabel() {
+      if (!this.result) return '';
+      if (this.result.ok) return `PASS · ${this.result.checked} entries`;
+      return `FAIL at seq ${this.result.first_broken_seq} · ${this.result.reason || ''}`;
+    },
+    async runVerify() {
+      this.running = true;
+      this.result = null;
+      // reset styles
+      document.querySelectorAll('.chain-block').forEach(el => {
+        el.classList.remove('ring-2', 'ring-allow', 'ring-deny', 'bg-allow-muted', 'dark:bg-green-900/20');
+      });
+      document.querySelectorAll('.chain-node').forEach(el => {
+        el.classList.remove('bg-allow', 'border-allow', 'bg-deny', 'border-deny', 'scale-125');
+      });
+      document.querySelectorAll('.chain-link').forEach(el => {
+        el.classList.remove('bg-allow', 'bg-deny');
+      });
+      document.querySelectorAll('.chain-fail-detail').forEach(el => {
+        el.classList.add('hidden');
+        el.textContent = '';
+      });
+
+      const r = await fetch('/ledger/verify-json', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '',
+        },
+      });
+      const data = await r.json();
+      this.result = data;
+
+      // Animate through blocks in ascending seq order
+      const blocks = [...document.querySelectorAll('[data-block]')].sort(
+        (a, b) => Number(a.dataset.block) - Number(b.dataset.block)
+      );
+      const broken = data.ok ? null : data.first_broken_seq;
+
+      for (const block of blocks) {
+        const seq = Number(block.dataset.block);
+        await new Promise(res => setTimeout(res, 40));
+        const node = document.querySelector(`[data-node="${seq}"]`);
+        if (broken !== null && seq === broken) {
+          block.classList.add('ring-2', 'ring-deny');
+          if (node) node.classList.add('bg-deny', 'border-deny', 'scale-125');
+          const detail = document.querySelector(`[data-fail-detail="${seq}"]`);
+          if (detail) {
+            detail.classList.remove('hidden');
+            let msg = data.reason || 'hash mismatch';
+            if (data.expected_hash && data.found_hash) {
+              msg += `\nexpected: ${data.expected_hash.slice(0, 16)}…\nfound:    ${data.found_hash.slice(0, 16)}…`;
+            }
+            detail.textContent = msg;
+          }
+          block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          break;
+        }
+        if (broken !== null && seq > broken) break;
+        block.classList.add('ring-2', 'ring-allow');
+        if (node) node.classList.add('bg-allow', 'border-allow');
+      }
+      this.running = false;
+    }
+  }
+}
+</script>
 {% endblock %}

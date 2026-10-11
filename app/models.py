@@ -90,6 +90,7 @@ class ActionRequest(Base):
     sla_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    evaluation_trace: Mapped[dict[str, Any] | list | None] = mapped_column(JSON, nullable=True)
 
     agent: Mapped[Agent] = relationship("Agent", back_populates="action_requests")
 

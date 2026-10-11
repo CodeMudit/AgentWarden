@@ -17,6 +17,46 @@
     <div><p class="text-xs text-slate-500">Rule</p><p class="font-mono text-xs">{{ ar.matched_rule_id or '—' }}</p></div>
     <div><p class="text-xs text-slate-500">Policy v</p><p>{{ ar.policy_version or '—' }}</p></div>
   </div>
+
+  {% if ar.trace %}
+  <div class="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+    <p class="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Why was this decided?</p>
+    <ul class="space-y-3">
+      {% for step in ar.trace %}
+      <li class="text-xs">
+        <div class="flex items-center gap-2 mb-1">
+          {% if step.matched %}
+          <span class="w-4 h-4 rounded-full bg-allow text-white flex items-center justify-center text-[10px]">✓</span>
+          {% else %}
+          <span class="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center text-[10px]">–</span>
+          {% endif %}
+          <span class="font-mono font-medium">{{ step.rule_id }}</span>
+          <span class="text-slate-400">p{{ step.priority }}</span>
+          {% if step.matched %}<span class="text-allow font-medium">→ {{ step.effect }}</span>{% endif %}
+        </div>
+        {% if step.conditions %}
+        <ul class="ml-6 space-y-0.5 text-slate-600 dark:text-slate-400">
+          {% for c in step.conditions %}
+          <li class="flex items-start gap-1.5">
+            {% if c.holds %}
+            <span class="text-allow">✓</span>
+            {% else %}
+            <span class="text-deny">✗</span>
+            {% endif %}
+            <span><span class="font-mono">{{ c.type }}</span>: {{ c.detail }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% if not ar.matched_rule_id %}
+    <p class="mt-2 text-xs text-slate-500 italic">No rule matched → default deny</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if ar.decision_reason %}
   <div>
     <p class="text-xs text-slate-500 mb-1">Reviewer reason</p>

@@ -29,6 +29,9 @@ class Decision:
     matched_rule_id: str | None
     reason: str
     policy_version: int | None = None
+    # Human-readable evaluation steps for the UI explainability panel
+    # [{rule_id, priority, matched, conditions: [{type, holds, detail}], effect}]
+    trace: list | None = None
 
 
 @dataclass
@@ -171,23 +174,26 @@ def _rule_matches(
     ctx: RequestContext,
     history_counts: dict[str, int],
     now: datetime,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, list[dict[str, Any]]]:
+    """Return (matched, summary, condition_steps)."""
     match = rule.get("match") or {}
     agents = match.get("agents")
     tools = match.get("tools")
+    steps: list[dict[str, Any]] = []
     if agents is not None and ctx.agent_name not in agents:
-        return False, "agent not in match.agents"
+        return False, "agent not in match.agents", steps
     if tools is not None and ctx.tool not in tools:
-        return False, "tool not in match.tools"
+        return False, "tool not in match.tools", steps
 
     conditions = rule.get("conditions") or []
     explanations: list[str] = []
     for cond in conditions:
         holds, expl = _eval_condition(cond, ctx, history_counts, now)
         explanations.append(expl)
+        steps.append({"type": cond.get("type"), "holds": holds, "detail": expl})
         if not holds:
-            return False, "; ".join(explanations)
-    return True, "; ".join(explanations) if explanations else "match ok"
+            return False, "; ".join(explanations), steps
+    return True, ("; ".join(explanations) if explanations else "match ok"), steps
 
 
 def evaluate(
@@ -209,25 +215,41 @@ def evaluate(
     rules = list(policy.get("rules") or [])
     rules_sorted = sorted(rules, key=lambda r: int(r.get("priority", 100)))
 
+    trace: list[dict[str, Any]] = []
     for rule in rules_sorted:
-        matched, expl = _rule_matches(rule, request_context, history_counts, now)
+        matched, expl, cond_steps = _rule_matches(rule, request_context, history_counts, now)
+        rid = rule.get("id", "unknown")
+        entry = {
+            "rule_id": rid,
+            "priority": rule.get("priority"),
+            "matched": matched,
+            "effect": rule.get("effect"),
+            "conditions": cond_steps,
+            "summary": expl,
+        }
+        trace.append(entry)
         if matched:
             effect = (rule.get("effect") or "deny").lower()
             if effect not in ALLOWED_EFFECTS:
                 effect = "deny"
-            rid = rule.get("id", "unknown")
             desc = rule.get("description") or rid
             reason = f"Matched rule '{rid}' (priority {rule.get('priority', '?')}): {expl}"
             if desc and desc != rid:
                 reason = (
                     f"Matched rule '{rid}' (priority {rule.get('priority', '?')}): {desc}. {expl}"
                 )
-            return Decision(effect=effect, matched_rule_id=rid, reason=reason)
+            return Decision(
+                effect=effect,
+                matched_rule_id=rid,
+                reason=reason,
+                trace=trace,
+            )
 
     return Decision(
         effect=default_effect,
         matched_rule_id=None,
         reason=f"No matching rule; default_effect={default_effect}",
+        trace=trace,
     )
 
 

@@ -15,8 +15,9 @@ Login: **admin@demo.local** / **demo-admin-pass**
 | 0:45 | Demo Lab → **Large refund** | “Nine hundred dollars: requires approval.” |
 | 0:55 | Approvals as **reviewer_b** (not the owner) | “Separation of duties: the agent’s owner cannot approve.” |
 | 1:15 | Demo Lab → **Leak customer data** | “External PII email: hard deny. Matched rule is shown.” |
-| 1:30 | Ledger → **Verify** | “PASS. Recompute every hash from genesis.” |
-| 1:40 | Demo Lab → **Tamper**, then Verify | “FAIL at the exact sequence. Tamper-evident, not tamper-proof.” |
+| 1:25 | Ledger → **Verify** | “Watch the chain light up green. PASS.” |
+| 1:35 | Demo Lab → **Tamper**, then Verify | “Stops on the red block with expected vs found hash.” |
+| 1:50 | Toggle **Judge** (header) | “Projector-friendly type size.” |
 | 1:55 | Close | “Named human owners, written reasons, default deny.” |
 
 ---

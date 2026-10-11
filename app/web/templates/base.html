@@ -1,6 +1,8 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full" x-data="{ dark: localStorage.getItem('aw-theme') === 'dark', sidebarOpen: false }"
-      :class="{ 'dark': dark }" x-init="$watch('dark', v => localStorage.setItem('aw-theme', v ? 'dark' : 'light'))">
+<html lang="en" class="h-full"
+      x-data="{ dark: localStorage.getItem('aw-theme') === 'dark', sidebarOpen: false, judge: localStorage.getItem('aw-judge') === '1' }"
+      :class="{ 'dark': dark, 'judge-mode': judge }"
+      x-init="$watch('dark', v => localStorage.setItem('aw-theme', v ? 'dark' : 'light')); $watch('judge', v => localStorage.setItem('aw-judge', v ? '1' : '0'))">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -32,6 +34,11 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
+    html.judge-mode { font-size: 18px; }
+    html.judge-mode .text-xs { font-size: 0.85rem !important; }
+    html.judge-mode .text-sm { font-size: 1rem !important; }
+    html.judge-mode aside .text-xs { display: none; }
+    html.judge-mode #ledger-badge { font-size: 0.9rem; }
     .htmx-swapping { opacity: 0; transition: opacity 0.2s ease-out; }
     .status-pill { @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium; }
   </style>
@@ -101,6 +108,10 @@
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
             Ledger · seq {{ ledger_seq or 0 }}
           </span>
+          <button @click="judge = !judge" class="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  :class="judge ? 'bg-brand-50 text-brand-700 dark:bg-brand-600/20' : ''" title="Larger type for projectors">
+            <span x-text="judge ? 'Judge on' : 'Judge'"></span>
+          </button>
           <button @click="dark = !dark" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Toggle theme">
             <svg x-show="!dark" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
             <svg x-show="dark" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>

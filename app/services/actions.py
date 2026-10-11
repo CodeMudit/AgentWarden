@@ -64,6 +64,7 @@ def request_action(
 
     # Kill switches first
     frozen, freeze_reason = is_system_frozen(db)
+    eval_trace = None
     if frozen:
         decision_effect = "deny"
         reason = freeze_reason or "System frozen"
@@ -97,6 +98,7 @@ def request_action(
         decision_effect = decision.effect
         reason = decision.reason
         matched_rule = decision.matched_rule_id
+        eval_trace = decision.trace
 
         if decision_effect == "allow":
             status = "allowed"
@@ -128,6 +130,7 @@ def request_action(
         created_at=now,
         sla_deadline=sla_deadline,
         context=context,
+        evaluation_trace=eval_trace,
     )
     db.add(ar)
     db.flush()

@@ -422,6 +422,7 @@ def action_detail(
         "matched_rule_id": ar.matched_rule_id,
         "policy_version": ar.policy_version,
         "decision_reason": ar.decision_reason,
+        "trace": ar.evaluation_trace,
     }
     return templates.TemplateResponse(
         request,
@@ -1121,3 +1122,63 @@ def demo_lab_run(
         return {"message": "Tamper repaired. Verify should PASS again."}
 
     return JSONResponse({"error": f"unknown scenario {scenario}"}, status_code=400)
+
+
+@router.post("/ledger/verify-json")
+def web_ledger_verify_json(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    verify_csrf(request, request.headers.get("X-CSRF-Token"))
+    result = ledger.verify(db)
+    return JSONResponse(result)
+
+
+@router.get("/partials/approvals-list", response_class=HTMLResponse)
+def approvals_list_partial(
+    request: Request,
+    tab: str = "pending",
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    # Reuse same data building as approvals_page
+    status_filter = "escalated" if tab == "escalated" else "pending"
+    rows = list(
+        db.execute(
+            select(ActionRequest)
+            .where(ActionRequest.status == status_filter)
+            .order_by(ActionRequest.created_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    agents = {a.id: a for a in db.execute(select(Agent)).scalars().all()}
+    now = datetime.now(timezone.utc)
+    items = []
+    for ar in rows:
+        agent = agents.get(ar.agent_id)
+        sla_rem = None
+        if ar.sla_deadline:
+            dl = ar.sla_deadline if ar.sla_deadline.tzinfo else ar.sla_deadline.replace(tzinfo=timezone.utc)
+            sla_rem = max(0, int((dl - now).total_seconds()))
+        items.append(
+            {
+                "id": ar.id,
+                "agent_name": agent.name if agent else "?",
+                "tool": ar.tool,
+                "summary": ar.summary,
+                "status": ar.status,
+                "created_at": ar.created_at.strftime("%Y-%m-%d %H:%M") if ar.created_at else "",
+                "amount": (ar.params or {}).get("amount"),
+                "sensitivity": ar.sensitivity,
+                "sla_remaining": sla_rem,
+                "is_owner": agent is not None and agent.owner_user_id == user.id,
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "partials/approvals_list.html",
+        _ctx(request, db, items=items, tab=tab),
+    )
+

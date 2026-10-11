@@ -201,3 +201,17 @@ def test_validate_policy_rejects_bad():
 
 def test_validate_policy_ok():
     assert validate_policy(BASE_POLICY) == []
+
+
+def test_evaluation_trace():
+    ctx = RequestContext(
+        agent_name="refund-bot", tool="issue_refund", params={"amount": 40}
+    )
+    d = evaluate(BASE_POLICY, ctx)
+    assert d.effect == "allow"
+    assert d.trace is not None
+    assert any(s.get("matched") for s in d.trace)
+    matched = next(s for s in d.trace if s.get("matched"))
+    assert matched["rule_id"] == "refund-small-auto"
+    assert matched["conditions"]
+    assert all("holds" in c for c in matched["conditions"])
