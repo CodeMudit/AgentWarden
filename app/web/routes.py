@@ -1212,133 +1212,6 @@ def demo_lab_run(
             "simulation": sim,
         }
 
-<<<<<<< HEAD
-=======
-    if scenario == "ps5_governance":
-        # Step 1: Ensure agent is active for the test
-        if refund.status == "paused":
-            resume_agent(db, refund, by=str(user.id), reason="Resetting for PS5 governance demo")
-            db.commit()
-            db.refresh(refund)
-
-        # Step 2: Agent attempts an unpermitted tool call (export_customer_pii) with sensitive data
-        ar1 = actions_svc.request_action(
-            db,
-            agent=refund,
-            tool="export_customer_pii",
-            params={"customer_id": "CUST-9912", "fields": ["ssn", "cc_number"]},
-            sensitivity="restricted",
-            data_used=["restricted:ssn", "restricted:cc_number"],
-        )
-        db.commit()
-        db.refresh(refund)
-        breach_caught = getattr(ar1, "is_breach", False) or ar1.decision == "deny"
-        breach_error_message = ar1.reason or "Policy breach detected"
-
-        # Step 3: Verify agent was automatically paused
-        agent_auto_paused = (refund.status == "paused")
-
-        # Step 4: Verify subsequent actions are immediately denied due to paused state
-        ar2 = actions_svc.request_action(
-            db,
-            agent=refund,
-            tool="issue_refund",
-            params={"amount": 25},
-            sensitivity="internal",
-        )
-        db.commit()
-        subsequent_denied = (ar2.decision == "deny" and "paused" in (ar2.reason or "").lower())
-
-        # Step 5: Query the Incident created for this breach
-        inc = db.execute(
-            select(Incident).where(Incident.agent_id == refund.id).order_by(Incident.created_at.desc())
-        ).scalars().first()
-
-        return {
-            "story": "PS5 Demo: Refund Bot attempted unpermitted action 'export_customer_pii' on restricted PII data.",
-            "policy_breach_detected": breach_caught,
-            "breach_message": breach_error_message,
-            "agent_auto_paused": agent_auto_paused,
-            "subsequent_action_blocked": subsequent_denied,
-            "incident_id": inc.id if inc else None,
-            "incident_severity": inc.severity if inc else None,
-            "message": "Policy breach detected! Agent automatically PAUSED, incident opened, and all subsequent calls blocked.",
-            "next_step": "Visit Incidents page to view the full accountability chain or Agent page to resume with authorization.",
-        }
-
->>>>>>> a981b25 (New Updates)
-    return JSONResponse({"error": f"unknown scenario {scenario}"}, status_code=400)
-
-
-@router.post("/ledger/verify-json")
-def web_ledger_verify_json(
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_web_user),
-):
-    verify_csrf(request, request.headers.get("X-CSRF-Token"))
-    result = ledger.verify(db)
-    return JSONResponse(result)
-
-
-@router.get("/partials/approvals-list", response_class=HTMLResponse)
-def approvals_list_partial(
-    request: Request,
-    tab: str = "pending",
-    db: Session = Depends(get_db),
-    user: User = Depends(require_web_user),
-):
-    status_filter = "escalated" if tab == "escalated" else "pending"
-    rows = list(
-        db.execute(
-            select(ActionRequest)
-            .where(ActionRequest.status == status_filter)
-            .order_by(ActionRequest.created_at.asc())
-        )
-        .scalars()
-        .all()
-    )
-    agents = {a.id: a for a in db.execute(select(Agent)).scalars().all()}
-    now = datetime.now(UTC)
-    items = []
-    for ar in rows:
-        agent = agents.get(ar.agent_id)
-        sla_rem = None
-        if ar.sla_deadline:
-            dl = ar.sla_deadline if ar.sla_deadline.tzinfo else ar.sla_deadline.replace(tzinfo=UTC)
-            sla_rem = max(0, int((dl - now).total_seconds()))
-        owner_name = None
-        if agent is not None:
-            from app.models import User as _User
-            ou = db.execute(select(_User).where(_User.id == agent.owner_user_id)).scalar_one_or_none()
-            owner_name = ou.name if ou else None
-        items.append(
-            {
-                "id": ar.id,
-                "agent_name": agent.name if agent else "?",
-                "tool": ar.tool,
-                "summary": ar.summary,
-                "status": ar.status,
-                "created_at": ar.created_at.strftime("%Y-%m-%d %H:%M") if ar.created_at else "",
-                "amount": (ar.params or {}).get("amount"),
-                "sensitivity": ar.sensitivity,
-                "sla_remaining": sla_rem,
-                "is_owner": agent is not None and agent.owner_user_id == user.id,
-                "params": ar.params or {},
-                "params_hash": getattr(ar, "params_hash", None),
-                "matched_rule_id": ar.matched_rule_id,
-                "owner_name": owner_name,
-            }
-        )
-    return templates.TemplateResponse(
-        request,
-        "partials/approvals_list.html",
-        _ctx(request, db, items=items, tab=tab),
-    )
-
-
-<<<<<<< HEAD
-=======
 @router.get("/activity", response_class=HTMLResponse)
 def activity_trail_page(
     request: Request,
@@ -1755,7 +1628,6 @@ def resolve_incident_form(
     return RedirectResponse(f"/incidents/{incident_id}?toast=Incident+resolved", status_code=303)
 
 
->>>>>>> a981b25 (New Updates)
 @router.get("/audit", response_class=HTMLResponse)
 @router.get("/audit/agent/{agent_id}", response_class=HTMLResponse)
 def audit_report(
@@ -1781,25 +1653,6 @@ def audit_report(
             .limit(200)
         )
     actions = list(db.execute(q).scalars().all())
-<<<<<<< HEAD
-    users = {u.id: u for u in db.execute(select(User)).scalars().all()}
-    rows = []
-    for ar in actions:
-        approver = None
-        if ar.decided_by:
-            u = users.get(ar.decided_by)
-            approver = u.name if u else str(ar.decided_by)
-        rows.append(
-            {
-                "ts": ar.created_at.strftime("%Y-%m-%d %H:%M") if ar.created_at else "",
-                "tool": ar.tool,
-                "decision": ar.decision or ar.status,
-                "rule": ar.matched_rule_id,
-                "approver": approver,
-                "reason": (ar.decision_reason or ar.reason or "")[:120],
-            }
-        )
-=======
     all_agents = list(db.execute(select(Agent)).scalars().all())
     agents_map = {a.id: a for a in all_agents}
     users = {u.id: u for u in db.execute(select(User)).scalars().all()}
@@ -1890,17 +1743,10 @@ def audit_report(
             "resolution_notes": inc.resolution_notes,
         })
 
->>>>>>> a981b25 (New Updates)
     stats = {
         "total": len(actions),
         "allowed": sum(1 for a in actions if a.status in ("allowed", "approved", "completed")),
         "denied": sum(1 for a in actions if a.status in ("denied", "rejected")),
-<<<<<<< HEAD
-        "pending": sum(1 for a in actions if a.status in ("pending", "escalated")),
-    }
-    verify = ledger.verify(db)
-    head = ledger.get_head(db)
-=======
         "approved": len(approvals_log),
         "breaches": len(breaches_log),
         "open_incidents": sum(1 for i in incidents_rows if i.status in ("open", "investigating")),
@@ -1917,7 +1763,6 @@ def audit_report(
     except Exception:
         pass
 
->>>>>>> a981b25 (New Updates)
     return templates.TemplateResponse(
         request,
         "audit_report.html",
@@ -1926,16 +1771,6 @@ def audit_report(
             db,
             agent=agent,
             owner_name=owner_name,
-<<<<<<< HEAD
-            rows=rows,
-            stats=stats,
-            verify=verify,
-            head=head,
-            generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        ),
-    )
-
-=======
             agents_snapshot=agents_snapshot,
             approvals_log=approvals_log,
             breaches_log=breaches_log,
@@ -2041,4 +1876,3 @@ def audit_export_json(
     return JSONResponse(report)
 
 
->>>>>>> a981b25 (New Updates)
