@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+
+{% block title %}Activity Trail · AgentWarden{% endblock %}
+{% block page_title %}Unified Activity Trail{% endblock %}
+
+{% block content %}
+<div class="space-y-6" x-data="{
+  modalOpen: false,
+  modalData: null,
+  async openChain(actionId) {
+    this.modalOpen = true;
+    this.modalData = { loading: true };
+    try {
+      const res = await fetch('/v1/activity/' + actionId + '/chain');
+      this.modalData = await res.json();
+    } catch(e) {
+      this.modalData = { error: 'Failed to load audit chain' };
+    }
+  }
+}">
+
+  <!-- Header & Explanation -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h2 class="text-xl font-bold tracking-tight">Unified Governance Activity Trail</h2>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+        Complete timeline of what each AI agent requested, which data scopes were touched, who approved actions, outcomes, and exact cryptographic ledger positions.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-mono px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+        {{ count }} events found
+      </span>
+      <a href="/v1/activity{% if querystring %}?{{ querystring }}{% endif %}" class="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 text-slate-700 dark:text-slate-200 shadow-sm" download="activity-trail.json">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        JSON Export
+      </a>
+    </div>
+  </div>
+
+  <!-- Filter Bar -->
+  <form method="get" action="/activity" class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Agent</label>
+        <select name="agent_id" class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <option value="">All Agents</option>
+          {% for ag in all_agents %}
+          <option value="{{ ag.id }}" {% if filters.agent_id == ag.id|string %}selected{% endif %}>{{ ag.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Decision</label>
+        <select name="decision" class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <option value="">All Decisions</option>
+          <option value="allow" {% if filters.decision == 'allow' %}selected{% endif %}>ALLOW</option>
+          <option value="deny" {% if filters.decision == 'deny' %}selected{% endif %}>DENY</option>
+          <option value="require_approval" {% if filters.decision == 'require_approval' %}selected{% endif %}>REQUIRE_APPROVAL</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Risk Tier</label>
+        <select name="risk_category" class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <option value="">All Risk Tiers</option>
+          <option value="low" {% if filters.risk_category == 'low' %}selected{% endif %}>Low</option>
+          <option value="medium" {% if filters.risk_category == 'medium' %}selected{% endif %}>Medium</option>
+          <option value="high" {% if filters.risk_category == 'high' %}selected{% endif %}>High</option>
+          <option value="critical" {% if filters.risk_category == 'critical' %}selected{% endif %}>Critical</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Outcome</label>
+        <select name="outcome" class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <option value="">All Outcomes</option>
+          <option value="completed" {% if filters.outcome == 'completed' %}selected{% endif %}>Completed</option>
+          <option value="failed" {% if filters.outcome == 'failed' %}selected{% endif %}>Failed</option>
+          <option value="allowed" {% if filters.outcome == 'allowed' %}selected{% endif %}>Allowed</option>
+          <option value="approved" {% if filters.outcome == 'approved' %}selected{% endif %}>Approved</option>
+          <option value="denied" {% if filters.outcome == 'denied' %}selected{% endif %}>Denied</option>
+          <option value="rejected" {% if filters.outcome == 'rejected' %}selected{% endif %}>Rejected</option>
+          <option value="pending" {% if filters.outcome == 'pending' %}selected{% endif %}>Pending</option>
+          <option value="escalated" {% if filters.outcome == 'escalated' %}selected{% endif %}>Escalated</option>
+        </select>
+      </div>
+
+      <div class="flex items-end gap-2">
+        <button type="submit" class="flex-1 text-xs font-semibold px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white shadow-sm transition">
+          Filter
+        </button>
+        <a href="/activity" class="text-xs font-medium px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-center">
+          Reset
+        </a>
+      </div>
+    </div>
+  </form>
+
+  <!-- Activity Trail Table -->
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead class="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold uppercase tracking-wider">
+          <tr>
+            <th class="px-4 py-3">Time & Action</th>
+            <th class="px-4 py-3">Agent & Owner</th>
+            <th class="px-4 py-3">Data Used</th>
+            <th class="px-4 py-3">Policy Match</th>
+            <th class="px-4 py-3">Decision</th>
+            <th class="px-4 py-3">Human Reviewer</th>
+            <th class="px-4 py-3">Outcome</th>
+            <th class="px-4 py-3">Ledger Seq</th>
+            <th class="px-4 py-3 text-right">Audit</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800/80">
+          {% for it in items %}
+          <tr class="hover:bg-slate-50/75 dark:hover:bg-slate-800/40 transition {% if it.is_breach %}bg-red-50/40 dark:bg-red-950/20{% endif %}">
+            <td class="px-4 py-3 align-top whitespace-nowrap">
+              <span class="font-medium text-slate-900 dark:text-slate-100">{{ it.created_at }}</span>
+              <p class="font-mono text-slate-500 mt-0.5 text-[11px] font-semibold">{{ it.tool }}</p>
+            </td>
+            <td class="px-4 py-3 align-top">
+              <div class="font-medium text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                <a href="/agents/{{ it.agent.id }}" class="hover:underline text-brand-600 dark:text-brand-400">{{ it.agent.name }}</a>
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium
+                  {% if it.agent.risk_category == 'critical' %}bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300
+                  {% elif it.agent.risk_category == 'high' %}bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300
+                  {% elif it.agent.risk_category == 'medium' %}bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300
+                  {% else %}bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300{% endif %}">
+                  {{ it.agent.risk_category }}
+                </span>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-0.5">{{ it.agent.owner_name }}</p>
+            </td>
+            <td class="px-4 py-3 align-top">
+              {% if it.data_used %}
+                <div class="flex flex-wrap gap-1">
+                  {% for scope in it.data_used %}
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium
+                    {% if 'pii' in scope or 'financial' in scope %}bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800
+                    {% else %}bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800{% endif %}">
+                    {{ scope }}
+                  </span>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <span class="text-slate-400 text-[11px]">—</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 align-top">
+              {% if it.matched_rule_id %}
+                <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">{{ it.matched_rule_id }}</span>
+                {% if it.policy_version %}<span class="text-[10px] text-slate-400 block mt-0.5">v{{ it.policy_version }}</span>{% endif %}
+              {% else %}
+                <span class="text-slate-400 text-[11px]">default-deny</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 align-top whitespace-nowrap">
+              {% if it.is_breach %}
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-200 border border-red-300 dark:border-red-700 animate-pulse">
+                  ⚠ BREACH
+                </span>
+              {% elif it.decision == 'allow' %}
+                <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-allow-muted text-allow dark:bg-green-950 dark:text-green-300">
+                  ALLOW
+                </span>
+              {% elif it.decision == 'deny' %}
+                <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-deny-muted text-deny dark:bg-red-950 dark:text-red-300">
+                  DENY
+                </span>
+              {% else %}
+                <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-pending-muted text-pending dark:bg-amber-950 dark:text-amber-300">
+                  APPROVAL REQ
+                </span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 align-top">
+              {% if it.approver %}
+                <p class="font-medium text-slate-800 dark:text-slate-200">{{ it.approver.name }}</p>
+                {% if it.decision_reason %}
+                <p class="text-[11px] text-slate-500 italic mt-0.5 max-w-xs truncate" title="{{ it.decision_reason }}">
+                  "{{ it.decision_reason }}"
+                </p>
+                {% endif %}
+              {% else %}
+                <span class="text-slate-400 text-[11px]">—</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 align-top whitespace-nowrap">
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium
+                {% if it.status == 'completed' %}bg-allow-muted text-allow
+                {% elif it.status == 'failed' or it.status == 'denied' %}bg-deny-muted text-deny
+                {% else %}bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300{% endif %}">
+                {{ it.status }}
+              </span>
+            </td>
+            <td class="px-4 py-3 align-top whitespace-nowrap font-mono text-[11px]">
+              {% if it.ledger_seq %}
+                <a href="/ledger#seq-{{ it.ledger_seq }}" class="text-verified hover:underline font-bold">#{{ it.ledger_seq }}</a>
+              {% else %}
+                <span class="text-slate-400">—</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 align-top text-right whitespace-nowrap">
+              <button @click="openChain({{ it.id }})" class="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-sm transition">
+                Chain View →
+              </button>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="9" class="px-4 py-8 text-center text-slate-400">
+              No matching activity recorded yet.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal: Single Action Accountability Chain & Ledger Trail -->
+  <div x-show="modalOpen" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" @click="modalOpen = false"></div>
+      <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+      <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full border border-slate-200 dark:border-slate-800">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h3 class="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2" id="modal-title">
+            <span>Audit Trail & Cryptographic Proof</span>
+            <span class="text-xs font-mono font-normal text-slate-400" x-text="'Action #' + (modalData?.action?.id || '')"></span>
+          </h3>
+          <button @click="modalOpen = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="p-6 max-h-[75vh] overflow-y-auto space-y-6">
+          <template x-if="modalData?.loading">
+            <div class="py-12 text-center text-slate-400">Loading audit trail…</div>
+          </template>
+
+          <template x-if="modalData && !modalData.loading">
+            <div class="space-y-6">
+              <!-- Breach Banner if applicable -->
+              <template x-if="modalData.action?.is_breach">
+                <div class="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200">
+                  <h4 class="font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    Policy Breach Detected — Automatic Pause Triggered
+                  </h4>
+                  <p class="text-xs mt-1 font-mono" x-text="modalData.action.breach_reason"></p>
+                </div>
+              </template>
+
+              <!-- Accountability Overview -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
+                  <h4 class="font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-2">AI Agent Identity</h4>
+                  <p class="font-bold text-sm text-slate-900 dark:text-slate-100" x-text="modalData.agent?.name"></p>
+                  <p class="text-slate-500 mt-1" x-text="modalData.agent?.purpose"></p>
+                  <div class="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-slate-600 dark:text-slate-400">
+                    <span>Accountable Owner:</span>
+                    <span class="font-semibold" x-text="modalData.agent?.owner?.name + ' (' + modalData.agent?.owner?.email + ')'"></span>
+                  </div>
+                </div>
+
+                <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
+                  <h4 class="font-bold text-slate-500 uppercase text-[10px] tracking-wider mb-2">Policy Decision</h4>
+                  <div class="flex items-center justify-between">
+                    <span class="font-semibold text-sm" x-text="modalData.action?.decision"></span>
+                    <span class="font-mono text-xs px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700" x-text="modalData.action?.matched_rule_id || 'default-deny'"></span>
+                  </div>
+                  <p class="text-slate-500 mt-2 font-mono text-[11px]" x-text="modalData.action?.reason"></p>
+                </div>
+              </div>
+
+              <!-- Data Scopes & Parameters -->
+              <div class="text-xs space-y-2">
+                <h4 class="font-bold text-slate-700 dark:text-slate-300">Data Scopes Used:</h4>
+                <div class="flex flex-wrap gap-1.5">
+                  <template x-for="scope in (modalData.action?.data_used || [])">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800" x-text="scope"></span>
+                  </template>
+                  <template x-if="!modalData.action?.data_used || modalData.action?.data_used.length === 0">
+                    <span class="text-slate-400 italic">None reported</span>
+                  </template>
+                </div>
+              </div>
+
+              <div class="text-xs space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-slate-700 dark:text-slate-300">Tool Parameters (Redacted):</span>
+                  <span class="font-mono text-[10px] text-slate-400" x-text="'SHA-256: ' + (modalData.action?.params_hash || '')"></span>
+                </div>
+                <pre class="p-3 rounded-xl bg-slate-950 text-slate-200 font-mono text-[11px] overflow-x-auto" x-text="JSON.stringify(modalData.action?.params, null, 2)"></pre>
+              </div>
+
+              <!-- Approver if present -->
+              <template x-if="modalData.approver">
+                <div class="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs">
+                  <h4 class="font-bold text-amber-800 dark:text-amber-300 uppercase text-[10px] tracking-wider mb-1">Human Sign-off & Reason</h4>
+                  <p class="text-slate-700 dark:text-slate-300">
+                    Approved by <strong x-text="modalData.approver?.name"></strong> (<span x-text="modalData.approver?.email"></span>) at <span x-text="modalData.action?.decided_at"></span>
+                  </p>
+                  <p class="mt-2 p-2 rounded bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900 font-mono text-slate-900 dark:text-slate-100" x-text="'Reason: ' + modalData.action?.decision_reason"></p>
+                </div>
+              </template>
+
+              <!-- Cryptographic Ledger Sequence -->
+              <div class="text-xs space-y-3">
+                <h4 class="font-bold text-slate-700 dark:text-slate-300">Cryptographic Ledger Chain Entries:</h4>
+                <div class="space-y-2">
+                  <template x-for="le in (modalData.ledger_trail || [])">
+                    <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 font-mono text-[11px]">
+                      <div class="flex items-center justify-between font-bold mb-1">
+                        <span class="text-verified" x-text="'seq #' + le.seq + ' · ' + le.event_type"></span>
+                        <span class="text-slate-400 font-normal" x-text="le.ts"></span>
+                      </div>
+                      <div class="text-slate-500 truncate" x-text="'hash: ' + le.hash"></div>
+                      <div class="text-slate-400 truncate" x-text="'prev: ' + le.prev_hash"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="px-6 py-3 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+          <button @click="modalOpen = false" class="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 transition">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

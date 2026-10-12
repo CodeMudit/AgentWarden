@@ -24,6 +24,7 @@ class ActionRequestIn(BaseModel):
     tool: str = Field(..., min_length=1, max_length=128)
     params: dict[str, Any] = Field(default_factory=dict)
     sensitivity: str = Field(default="internal")
+    data_used: list[str] = Field(default_factory=list)
     context: dict[str, Any] | None = None
 
     @field_validator("sensitivity")
@@ -43,6 +44,7 @@ class ActionDecisionOut(BaseModel):
     policy_version: int | None = None
     status: str | None = None
     poll_url: str | None = None
+    decision_token: str | None = None  # issued on ALLOW; use to invoke tool
 
 
 class ActionStatusOut(BaseModel):
@@ -50,6 +52,8 @@ class ActionStatusOut(BaseModel):
     agent_id: int
     tool: str
     params: dict[str, Any]
+    params_hash: str | None = None
+    data_used: list[str] = Field(default_factory=list)
     sensitivity: str
     status: str
     decision: str | None
@@ -62,6 +66,8 @@ class ActionStatusOut(BaseModel):
     decision_reason: str | None
     escalated_at: datetime | None
     sla_deadline: datetime | None
+    is_breach: bool = False
+    breach_reason: str | None = None
     result: dict[str, Any] | None
 
     model_config = {"from_attributes": True}
@@ -70,6 +76,8 @@ class ActionStatusOut(BaseModel):
 class ActionCompleteIn(BaseModel):
     success: bool
     result: dict[str, Any] | None = None
+    # Optional: if provided, must match the params hash approved at request time
+    execution_params: dict[str, Any] | None = None
 
 
 # --- Approvals ---
@@ -87,13 +95,21 @@ class AgentCreateIn(BaseModel):
     purpose: str = ""
     owner_user_id: int
     risk_tier: str = "medium"
+    risk_category: str | None = None
+    permitted_actions: list[str] = Field(default_factory=list)
+    data_access: list[str] = Field(default_factory=list)
+    cost_per_call: float = 0.01
 
     @field_validator("risk_tier")
     @classmethod
     def tier_ok(cls, v: str) -> str:
-        if v not in ("low", "medium", "high"):
-            raise ValueError("risk_tier must be low|medium|high")
+        if v not in ("low", "medium", "high", "critical"):
+            raise ValueError("risk_tier must be low|medium|high|critical")
         return v
+
+
+class AgentStatusChangeIn(BaseModel):
+    reason: str = Field(..., min_length=5, max_length=2000)
 
 
 class AgentOut(BaseModel):
@@ -102,7 +118,13 @@ class AgentOut(BaseModel):
     purpose: str
     owner_user_id: int
     risk_tier: str
+    risk_category: str = "medium"
     status: str
+    permitted_actions: list[str] = Field(default_factory=list)
+    data_access: list[str] = Field(default_factory=list)
+    cost_per_call: float = 0.01
+    breach_count: int = 0
+    status_reason: str | None = None
     api_key_prefix: str
     created_at: datetime
 
@@ -192,7 +214,7 @@ class FreezeIn(BaseModel):
     note: str | None = None
 
 
-# --- Users (minimal for Phase 1 tests) ---
+# --- Users ---
 
 
 class UserCreateIn(BaseModel):
@@ -208,5 +230,116 @@ class UserOut(BaseModel):
     name: str
     role: str
     is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+# --- Tokens ---
+
+
+class TokenVerifyIn(BaseModel):
+    token: str
+    tool: str | None = None
+    params_hash: str | None = None
+    agent_id: int | None = None
+
+
+class TokenVerifyOut(BaseModel):
+    valid: bool
+    reason: str
+    claims: dict[str, Any] | None = None
+
+
+# --- Work Items ---
+
+
+class WorkItemCreateIn(BaseModel):
+    title: str = Field(..., min_length=3, max_length=255)
+    task_type: str = Field(..., min_length=2, max_length=64)
+    risk_category: str = "medium"
+    confidence_score: float | None = None
+    preferred_agent_id: int | None = None
+    preferred_user_id: int | None = None
+    action_request_id: int | None = None
+    notes: str | None = None
+
+
+class WorkItemOut(BaseModel):
+    id: int
+    title: str
+    task_type: str
+    assignee_type: str
+    assignee_id: str
+    status: str
+    risk_category: str
+    confidence_score: float | None
+    action_request_id: int | None
+    created_at: datetime
+    completed_at: datetime | None
+    notes: str | None
+
+    model_config = {"from_attributes": True}
+
+
+# --- Exceptions ---
+
+
+class ExceptionCreateIn(BaseModel):
+    title: str = Field(..., min_length=3, max_length=255)
+    agent_id: int | None = None
+    action_request_id: int | None = None
+    severity: str = "high"
+    assigned_user_id: int | None = None
+    initial_note: str | None = None
+
+
+class ExceptionResolveIn(BaseModel):
+    resolution_note: str = Field(..., min_length=10, max_length=2000)
+
+
+class ExceptionOut(BaseModel):
+    id: int
+    title: str
+    agent_id: int | None
+    action_request_id: int | None
+    status: str
+    severity: str
+    assigned_user_id: int | None
+    resolution_note: str | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+# --- Incidents ---
+
+
+class IncidentCreateIn(BaseModel):
+    title: str = Field(..., min_length=5, max_length=255)
+    description: str = Field(..., min_length=10, max_length=5000)
+    agent_id: int | None = None
+    action_request_id: int | None = None
+    severity: str = "high"
+    assigned_user_id: int | None = None
+
+
+class IncidentResolveIn(BaseModel):
+    resolution_notes: str = Field(..., min_length=10, max_length=2000)
+
+
+class IncidentOut(BaseModel):
+    id: int
+    title: str
+    description: str
+    agent_id: int | None
+    action_request_id: int | None
+    status: str
+    severity: str
+    created_by_user_id: int
+    assigned_user_id: int | None
+    resolution_notes: str | None
+    created_at: datetime
+    resolved_at: datetime | None
 
     model_config = {"from_attributes": True}

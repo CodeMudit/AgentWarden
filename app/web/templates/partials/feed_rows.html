@@ -1,38 +1,57 @@
+{% from "macros.html" import decision_badge %}
 {% if rows %}
-<table class="w-full text-sm">
+<table class="w-full text-sm" role="table" aria-label="Live action feed">
   <thead class="sticky top-0 bg-slate-50 dark:bg-slate-800/80 text-xs text-slate-500 uppercase tracking-wide">
     <tr>
-      <th class="text-left font-medium px-5 py-3">Time</th>
-      <th class="text-left font-medium px-3 py-3">Agent</th>
-      <th class="text-left font-medium px-3 py-3">Tool</th>
-      <th class="text-left font-medium px-3 py-3">Params</th>
-      <th class="text-left font-medium px-3 py-3">Decision</th>
-      <th class="text-left font-medium px-3 py-3">Rule</th>
+      <th class="text-left font-medium px-5 py-3" scope="col">Time</th>
+      <th class="text-left font-medium px-3 py-3" scope="col">Agent</th>
+      <th class="text-left font-medium px-3 py-3" scope="col">Tool</th>
+      <th class="text-left font-medium px-3 py-3" scope="col">Params</th>
+      <th class="text-left font-medium px-3 py-3" scope="col">Decision</th>
+      <th class="text-left font-medium px-3 py-3" scope="col">Rule</th>
     </tr>
   </thead>
-  <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+  <tbody class="divide-y divide-slate-100 dark:divide-slate-800" id="feed-tbody" aria-live="polite">
     {% for r in rows %}
-    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onclick="openDetail({{ r.id }})">
+    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer"
+        data-id="{{ r.id }}"
+        onclick="openDetail({{ r.id }})"
+        onkeydown="if(event.key==='Enter')openDetail({{ r.id }})"
+        tabindex="0"
+        role="button"
+        aria-label="Open action {{ r.id }}">
       <td class="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">{{ r.created_at.strftime('%H:%M:%S') if r.created_at else '' }}</td>
       <td class="px-3 py-3 font-medium">{{ r.agent_name }}</td>
       <td class="px-3 py-3 font-mono text-xs">{{ r.tool }}</td>
-      <td class="px-3 py-3 text-xs text-slate-500 max-w-[12rem] truncate">{{ r.params_preview }}</td>
+      <td class="px-3 py-3 text-xs text-slate-500 max-w-[12rem] truncate" title="{{ r.params_preview }}">{{ r.params_preview }}</td>
       <td class="px-3 py-3">
         {% set d = r.decision or r.status %}
-        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
-          {% if d in ('allow','allowed','approved') %}bg-allow-muted text-allow
-          {% elif d in ('deny','denied','rejected') %}bg-deny-muted text-deny
-          {% elif d == 'escalated' %}bg-escalated-muted text-escalated
-          {% else %}bg-pending-muted text-pending{% endif %}">{{ d }}</span>
+        {{ decision_badge(d) }}
       </td>
       <td class="px-3 py-3 text-xs font-mono text-slate-500">{{ r.matched_rule_id or '—' }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+<script>
+(function() {
+  const tb = document.getElementById('feed-tbody');
+  if (!tb) return;
+  if (!window.__awFeedIds) {
+    window.__awFeedIds = new Set(Array.from(tb.querySelectorAll('tr[data-id]')).map(tr => tr.dataset.id));
+    return;
+  }
+  tb.querySelectorAll('tr[data-id]').forEach(tr => {
+    if (!window.__awFeedIds.has(tr.dataset.id)) {
+      tr.classList.add('aw-row-new');
+      window.__awFeedIds.add(tr.dataset.id);
+    }
+  });
+})();
+</script>
 {% else %}
 <div class="text-center py-16 text-slate-400">
-  <svg class="w-14 h-14 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+  <svg class="w-14 h-14 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
   <p class="text-sm">No actions yet. Register an agent and send a request.</p>
 </div>
 {% endif %}

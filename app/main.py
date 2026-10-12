@@ -13,7 +13,18 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app import __version__, ledger
-from app.api import actions, agents, approvals, ledger_api, policies, system, users
+from app.api import (
+    actions,
+    activity_api,
+    agents,
+    approvals,
+    incidents_api,
+    ledger_api,
+    policies,
+    system,
+    tokens,
+    users,
+)
 from app.config import get_settings
 from app.db import SessionLocal, check_db_connection, init_db
 from app.logging_config import setup_logging
@@ -162,6 +173,9 @@ def create_app() -> FastAPI:
     app.include_router(ledger_api.router, prefix="/v1")
     app.include_router(system.router, prefix="/v1")
     app.include_router(users.router, prefix="/v1")
+    app.include_router(tokens.router, prefix="/v1")
+    app.include_router(activity_api.router, prefix="/v1")
+    app.include_router(incidents_api.router, prefix="/v1")
 
     # Web UI
     app.include_router(web_routes.router)

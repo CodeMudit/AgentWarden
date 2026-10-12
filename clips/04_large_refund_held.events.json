@@ -1,0 +1,73 @@
+[
+ {
+  "t": 2.24,
+  "kind": "click",
+  "box": {
+   "x": 1652,
+   "y": 18.5,
+   "width": 53,
+   "height": 26
+  },
+  "note": "judge mode"
+ },
+ {
+  "t": 2.87,
+  "kind": "judge",
+  "note": "size 32->36"
+ },
+ {
+  "t": 4.75,
+  "kind": "click",
+  "box": {
+   "x": 13.5,
+   "y": 360,
+   "width": 260,
+   "height": 49.5
+  },
+  "note": "nav demo lab"
+ },
+ {
+  "t": 7.96,
+  "kind": "click",
+  "box": {
+   "x": 1136.5,
+   "y": 230.5,
+   "width": 70,
+   "height": 40.5
+  },
+  "note": "large refund"
+ },
+ {
+  "t": 10.48,
+  "kind": "focus",
+  "box": {
+   "x": 1113,
+   "y": 148.5,
+   "width": 780,
+   "height": 294.5
+  },
+  "note": "large refund result"
+ },
+ {
+  "t": 14.15,
+  "kind": "click",
+  "box": {
+   "x": 13.5,
+   "y": 180,
+   "width": 260,
+   "height": 40.5
+  },
+  "note": "nav approval"
+ },
+ {
+  "t": 15.75,
+  "kind": "focus",
+  "box": {
+   "x": 13.5,
+   "y": 180,
+   "width": 260,
+   "height": 40.5
+  },
+  "note": "pending|require|held|approval"
+ }
+]

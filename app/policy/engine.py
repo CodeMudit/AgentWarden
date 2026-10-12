@@ -17,6 +17,10 @@ ALLOWED_CONDITION_TYPES = {
     "domain_in",
     "domain_not_in",
     "sensitivity_in",
+    "data_scope_in",
+    "data_scope_not_in",
+    "data_used_in",
+    "data_used_not_in",
     "time_window",
     "rate_limit",
     "param_matches",
@@ -40,6 +44,7 @@ class RequestContext:
     tool: str
     params: dict[str, Any] = field(default_factory=dict)
     sensitivity: str = "internal"
+    data_used: list[str] = field(default_factory=list)
     now: datetime | None = None
 
 
@@ -120,6 +125,21 @@ def _eval_condition(
         values = [v.lower() for v in cond.get("value", [])]
         holds = ctx.sensitivity.lower() in values
         return holds, f"sensitivity={ctx.sensitivity} in {values}"
+
+    if ctype in ("data_scope_in", "data_used_in"):
+        values = {v.lower() for v in cond.get("value", [])}
+        used = {d.lower() for d in ctx.data_used}
+        matched = bool(used & values)
+        return matched, f"data_used={ctx.data_used} intersects {sorted(values)} = {matched}"
+
+    if ctype in ("data_scope_not_in", "data_used_not_in"):
+        values = {v.lower() for v in cond.get("value", [])}
+        used = {d.lower() for d in ctx.data_used}
+        matched = not bool(used & values)
+        return (
+            matched,
+            f"data_used={ctx.data_used} has no overlap with {sorted(values)} = {matched}",
+        )
 
     if ctype == "time_window":
         conf = cond.get("value") or {}
@@ -311,7 +331,15 @@ def validate_policy(policy: dict[str, Any]) -> list[str]:
                     re.compile(cond.get("value") or "")
                 except re.error as e:
                     errors.append(f"rules[{i}].conditions[{j}] bad regex: {e}")
-            if ctype in ("domain_in", "domain_not_in", "sensitivity_in"):
+            if ctype in (
+                "domain_in",
+                "domain_not_in",
+                "sensitivity_in",
+                "data_scope_in",
+                "data_scope_not_in",
+                "data_used_in",
+                "data_used_not_in",
+            ):
                 if not isinstance(cond.get("value"), list):
                     errors.append(f"rules[{i}].conditions[{j}] value must be a list")
             if ctype in ("amount_gt", "amount_gte", "amount_lt", "amount_lte"):

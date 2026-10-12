@@ -1,4 +1,4 @@
-"""Global and per-agent kill switches."""
+"""Global and per-agent kill switches and governance state transitions."""
 
 from __future__ import annotations
 
@@ -66,23 +66,55 @@ def unfreeze_system(db: Session, by: str) -> SystemState:
     return state
 
 
-def suspend_agent(db: Session, agent: Agent, by: str) -> Agent:
-    agent.status = "suspended"
+def pause_agent(db: Session, agent: Agent, by: str, reason: str = "Manual pause") -> Agent:
+    """Pause an agent: all requests will be denied."""
+    now = datetime.now(UTC)
+    agent.status = "paused"
+    agent.status_reason = reason
+    agent.status_updated_at = now
+    agent.status_updated_by = by
     ledger.append(
         db,
-        event_type="agent_suspended",
+        event_type="agent_paused",
         actor_type="user",
         actor_id=by,
         subject_type="agent",
         subject_id=str(agent.id),
-        payload={"name": agent.name},
+        payload={"name": agent.name, "reason": reason},
+        ts=now,
     )
     db.flush()
     return agent
 
 
-def resume_agent(db: Session, agent: Agent, by: str) -> Agent:
+def restrict_agent(db: Session, agent: Agent, by: str, reason: str = "Manual restriction") -> Agent:
+    """Restrict an agent: reduces permissions to safe non-sensitive actions only."""
+    now = datetime.now(UTC)
+    agent.status = "restricted"
+    agent.status_reason = reason
+    agent.status_updated_at = now
+    agent.status_updated_by = by
+    ledger.append(
+        db,
+        event_type="agent_restricted",
+        actor_type="user",
+        actor_id=by,
+        subject_type="agent",
+        subject_id=str(agent.id),
+        payload={"name": agent.name, "reason": reason},
+        ts=now,
+    )
+    db.flush()
+    return agent
+
+
+def resume_agent(db: Session, agent: Agent, by: str, reason: str = "Manual resume") -> Agent:
+    """Resume an agent: restores active status. Requires admin identity and written reason."""
+    now = datetime.now(UTC)
     agent.status = "active"
+    agent.status_reason = f"Resumed: {reason}"
+    agent.status_updated_at = now
+    agent.status_updated_by = by
     ledger.append(
         db,
         event_type="agent_resumed",
@@ -90,7 +122,29 @@ def resume_agent(db: Session, agent: Agent, by: str) -> Agent:
         actor_id=by,
         subject_type="agent",
         subject_id=str(agent.id),
-        payload={"name": agent.name},
+        payload={"name": agent.name, "reason": reason},
+        ts=now,
+    )
+    db.flush()
+    return agent
+
+
+def suspend_agent(db: Session, agent: Agent, by: str, reason: str = "Manual suspend") -> Agent:
+    """Backwards-compatible alias for pause_agent, writing agent_suspended and agent_paused."""
+    now = datetime.now(UTC)
+    agent.status = "suspended"
+    agent.status_reason = reason
+    agent.status_updated_at = now
+    agent.status_updated_by = by
+    ledger.append(
+        db,
+        event_type="agent_suspended",
+        actor_type="user",
+        actor_id=by,
+        subject_type="agent",
+        subject_id=str(agent.id),
+        payload={"name": agent.name, "reason": reason},
+        ts=now,
     )
     db.flush()
     return agent

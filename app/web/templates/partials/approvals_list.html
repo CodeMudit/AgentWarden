@@ -1,20 +1,36 @@
+{% from "macros.html" import decision_badge %}
 {% if items %}
 <div class="grid gap-4 md:grid-cols-2">
   {% for item in items %}
-  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm"
-       x-data="{ mode: null, remaining: {{ item.sla_remaining if item.sla_remaining is not none else 'null' }} }"
-       x-init="if (remaining !== null) { setInterval(() => { if (remaining > 0) remaining-- }, 1000) }">
+  <article class="aw-card p-5"
+       x-data="{ mode: null, remaining: {{ item.sla_remaining if item.sla_remaining is not none else 'null' }}, reasonLen: 0 }"
+       x-init="if (remaining !== null) { setInterval(() => { if (remaining > 0) remaining-- }, 1000) }"
+       aria-label="Approval request {{ item.id }}">
     <div class="flex items-start justify-between gap-2 mb-3">
-      <div>
-        <p class="font-semibold">{{ item.agent_name }} · <span class="font-mono text-sm font-normal">{{ item.tool }}</span></p>
-        <p class="text-xs text-slate-500 mt-0.5">{{ item.created_at }}</p>
+      <div class="min-w-0">
+        <p class="font-semibold truncate">{{ item.agent_name }} · <span class="font-mono text-sm font-normal">{{ item.tool }}</span></p>
+        <p class="text-xs text-slate-500 mt-0.5">{{ item.created_at }}
+          {% if item.owner_name %} · Owner: <span class="font-medium text-slate-700 dark:text-slate-200">{{ item.owner_name }}</span>{% endif %}
+        </p>
       </div>
-      <span class="text-xs px-2 py-0.5 rounded-full {% if item.status == 'escalated' %}bg-escalated-muted text-escalated{% else %}bg-pending-muted text-pending{% endif %}">{{ item.status }}</span>
+      {{ decision_badge(item.status) }}
     </div>
     <p class="text-sm text-slate-700 dark:text-slate-300 mb-3">{{ item.summary }}</p>
+
+    <div class="mb-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-xs">
+      <p class="font-semibold text-slate-600 dark:text-slate-300 mb-1">Exact parameters</p>
+      <pre class="font-mono overflow-x-auto whitespace-pre-wrap">{{ item.params | tojson(indent=2) if item.params is mapping else '{}' }}</pre>
+      {% if item.params_hash %}
+      <p class="mt-2 font-mono text-slate-500 break-all">params_hash: {{ item.params_hash }}</p>
+      {% endif %}
+      {% if item.matched_rule_id %}
+      <p class="mt-1">Matched rule: <span class="font-mono font-medium text-brand-600">{{ item.matched_rule_id }}</span></p>
+      {% endif %}
+    </div>
+
     <div class="flex flex-wrap gap-2 mb-4 text-xs">
       {% if item.amount is not none %}
-      <span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">Amount: {{ item.amount }}</span>
+      <span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-mono">amount: {{ item.amount }}</span>
       {% endif %}
       <span class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">{{ item.sensitivity }}</span>
       <template x-if="remaining !== null">
@@ -23,25 +39,31 @@
               x-text="'SLA ' + remaining + 's'"></span>
       </template>
     </div>
+
     {% if item.is_owner %}
-    <p class="text-xs text-slate-500 italic mb-2">You own this agent — approval disabled</p>
+    <div class="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-3 text-xs text-amber-900 dark:text-amber-100" role="status">
+      <strong>Separation of duties:</strong> you own agent <em>{{ item.agent_name }}</em>, so you cannot approve or reject this request. Another reviewer must decide.
+    </div>
     <div class="flex gap-2">
-      <button disabled class="flex-1 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-400 py-2 text-sm cursor-not-allowed">Approve</button>
-      <button disabled class="flex-1 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-400 py-2 text-sm cursor-not-allowed">Reject</button>
+      <button type="button" disabled aria-disabled="true" class="flex-1 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-400 py-2 text-sm cursor-not-allowed">Approve</button>
+      <button type="button" disabled aria-disabled="true" class="flex-1 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-400 py-2 text-sm cursor-not-allowed">Reject</button>
     </div>
     {% elif current_user.role == 'auditor' %}
-    <p class="text-xs text-slate-500">Read-only (auditor)</p>
+    <p class="text-xs text-slate-500">Read-only (auditor role)</p>
     {% else %}
     <div class="flex gap-2">
       <button type="button" @click="mode='approve'" class="flex-1 rounded-xl bg-allow text-white py-2 text-sm font-medium hover:opacity-90">Approve</button>
       <button type="button" @click="mode='reject'" class="flex-1 rounded-xl bg-deny text-white py-2 text-sm font-medium hover:opacity-90">Reject</button>
-      <div x-show="mode" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div x-show="mode" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog">
         <div class="absolute inset-0 bg-black/40" @click="mode=null"></div>
         <form method="post" :action="'/approvals/' + {{ item.id }} + '/' + mode" class="relative bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-xl border border-slate-200 dark:border-slate-800">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <h3 class="font-semibold mb-3" x-text="mode === 'approve' ? 'Approve request' : 'Reject request'"></h3>
-          <label class="block text-sm mb-1">Reason (min 10 characters)</label>
-          <textarea name="reason" required minlength="10" rows="3" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm mb-4"></textarea>
+          <label class="block text-sm mb-1" for="reason-{{ item.id }}">Reason (min 10 characters)</label>
+          <textarea id="reason-{{ item.id }}" name="reason" required minlength="10" rows="3"
+                    @input="reasonLen = $event.target.value.length"
+                    class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm mb-1"></textarea>
+          <p class="text-xs mb-4" :class="reasonLen >= 10 ? 'aw-counter-ok' : 'aw-counter-warn'" x-text="reasonLen + ' / 10 min'"></p>
           <div class="flex gap-2 justify-end">
             <button type="button" @click="mode=null" class="px-4 py-2 text-sm rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800">Cancel</button>
             <button type="submit" class="px-4 py-2 text-sm rounded-xl text-white font-medium" :class="mode==='approve' ? 'bg-allow' : 'bg-deny'" x-text="mode==='approve' ? 'Confirm approve' : 'Confirm reject'"></button>
@@ -50,12 +72,12 @@
       </div>
     </div>
     {% endif %}
-  </div>
+  </article>
   {% endfor %}
 </div>
 {% else %}
 <div class="text-center py-16 text-slate-400">
-  <svg class="w-14 h-14 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+  <svg class="w-14 h-14 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
   <p class="text-sm">Queue is empty</p>
 </div>
 {% endif %}

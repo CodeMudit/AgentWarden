@@ -1,0 +1,40 @@
+[
+ {
+  "t": 2.05,
+  "kind": "click",
+  "box": {
+   "x": 1652,
+   "y": 18.5,
+   "width": 53,
+   "height": 26
+  },
+  "note": "judge mode"
+ },
+ {
+  "t": 2.68,
+  "kind": "judge",
+  "note": "size 32->36"
+ },
+ {
+  "t": 5.54,
+  "kind": "focus",
+  "box": {
+   "x": 13.5,
+   "y": 315,
+   "width": 260,
+   "height": 40.5
+  },
+  "note": "ledger"
+ },
+ {
+  "t": 8.59,
+  "kind": "focus",
+  "box": {
+   "x": 1142.5,
+   "y": 22,
+   "width": 145,
+   "height": 27
+  },
+  "note": "operational"
+ }
+]

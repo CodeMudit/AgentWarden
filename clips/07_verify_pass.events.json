@@ -1,0 +1,40 @@
+[
+ {
+  "t": 1.74,
+  "kind": "click",
+  "box": {
+   "x": 119.96875,
+   "y": 529.875,
+   "width": 52.328125,
+   "height": 21
+  },
+  "note": "judge mode"
+ },
+ {
+  "t": 2.36,
+  "kind": "judge",
+  "note": "size 32->36"
+ },
+ {
+  "t": 4.25,
+  "kind": "click",
+  "box": {
+   "x": 8,
+   "y": 519,
+   "width": 1904,
+   "height": 42
+  },
+  "note": "nav ledger"
+ },
+ {
+  "t": 7.87,
+  "kind": "click",
+  "box": {
+   "x": 8,
+   "y": 1044.578125,
+   "width": 109.0625,
+   "height": 27
+  },
+  "note": "verify"
+ }
+]

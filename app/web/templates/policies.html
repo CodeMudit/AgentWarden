@@ -52,9 +52,37 @@
     </div>
   </form>
   {% if sim %}
-  <div class="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 text-sm">
-    <p class="font-medium mb-2">Simulation result</p>
-    <p>Total {{ sim.total }} · Unchanged {{ sim.unchanged }} · Newly allowed {{ sim.newly_allowed }} · Newly denied {{ sim.newly_denied }} · Newly require approval {{ sim.newly_require_approval }}</p>
+  <div class="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 text-sm space-y-3">
+    <p class="font-medium">Simulation result</p>
+    <p>Total {{ sim.total }} · Unchanged {{ sim.unchanged }} · Newly allowed {{ sim.newly_allowed }} · Newly denied {{ sim.newly_denied }} · Newly HOLD {{ sim.newly_require_approval }}</p>
+    {% if sim.changed %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs" aria-label="Policy simulation diff">
+        <thead>
+          <tr class="text-left text-slate-500 border-b border-slate-200 dark:border-slate-700">
+            <th class="py-2 pr-2">Action</th>
+            <th class="py-2 pr-2">Agent / tool</th>
+            <th class="py-2 pr-2">Old</th>
+            <th class="py-2 pr-2">New</th>
+            <th class="py-2">Rules</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in sim.changed %}
+          <tr class="border-b border-slate-100 dark:border-slate-800 bg-amber-50/50 dark:bg-amber-900/10">
+            <td class="py-2 pr-2 font-mono">#{{ row.action_id }}</td>
+            <td class="py-2 pr-2">{{ row.agent_name }} · {{ row.tool }}</td>
+            <td class="py-2 pr-2 font-medium">{{ row.old_decision }}</td>
+            <td class="py-2 pr-2 font-medium text-brand-600">{{ row.new_decision }}</td>
+            <td class="py-2 font-mono text-slate-500">{{ row.old_rule or '—' }} → {{ row.new_rule or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-slate-500">No decision flips on the last {{ sim.total }} actions.</p>
+    {% endif %}
   </div>
   {% endif %}
 </div>

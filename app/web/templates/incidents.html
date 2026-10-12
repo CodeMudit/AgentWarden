@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Incidents & Accountability · AgentWarden{% endblock %}
+{% block page_title %}Incidents & Human Accountability{% endblock %}
+
+{% block content %}
+<div class="space-y-6" x-data="{ openModal: false }">
+
+  <!-- Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h2 class="text-xl font-bold tracking-tight">Governance Incidents & Accountability</h2>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+        Track policy breaches, abnormal model outputs, and unauthorized actions with full, immutable accountability chains naming every human responsible.
+      </p>
+    </div>
+    {% if current_user.role in ['admin', 'reviewer'] %}
+    <button @click="openModal = true" class="text-xs font-semibold px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white shadow-sm transition">
+      + Report New Incident
+    </button>
+    {% endif %}
+  </div>
+
+  <!-- Incident KPI Cards -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <div class="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
+        <span>Open Incidents</span>
+        <span class="w-2 h-2 rounded-full bg-deny"></span>
+      </div>
+      <p class="mt-2 text-2xl font-bold text-red-600 dark:text-red-400">{{ stats.open }}</p>
+      <p class="mt-1 text-[11px] text-slate-500">Requires human review & resolution</p>
+    </div>
+
+    <div class="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <div class="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
+        <span>Under Investigation</span>
+        <span class="w-2 h-2 rounded-full bg-pending"></span>
+      </div>
+      <p class="mt-2 text-2xl font-bold text-amber-600 dark:text-amber-400">{{ stats.investigating }}</p>
+      <p class="mt-1 text-[11px] text-slate-500">Assigned to reviewer</p>
+    </div>
+
+    <div class="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <div class="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
+        <span>Resolved</span>
+        <span class="w-2 h-2 rounded-full bg-allow"></span>
+      </div>
+      <p class="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">{{ stats.resolved }}</p>
+      <p class="mt-1 text-[11px] text-slate-500">Resolved with written notes in ledger</p>
+    </div>
+  </div>
+
+  <!-- Incidents Table -->
+  <div class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead class="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold uppercase tracking-wider">
+          <tr>
+            <th class="px-4 py-3">Incident</th>
+            <th class="px-4 py-3">Severity</th>
+            <th class="px-4 py-3">Agent</th>
+            <th class="px-4 py-3">Assigned Owner</th>
+            <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3">Created</th>
+            <th class="px-4 py-3 text-right">Accountability Chain</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800/80">
+          {% for inc in incidents %}
+          <tr class="hover:bg-slate-50/75 dark:hover:bg-slate-800/40 transition">
+            <td class="px-4 py-3">
+              <a href="/incidents/{{ inc.id }}" class="font-bold text-slate-900 dark:text-slate-100 hover:text-brand-600 dark:hover:text-brand-400">
+                #{{ inc.id }} · {{ inc.title }}
+              </a>
+              <p class="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{{ inc.description }}</p>
+            </td>
+            <td class="px-4 py-3 whitespace-nowrap">
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold
+                {% if inc.severity == 'critical' %}bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300
+                {% elif inc.severity == 'high' %}bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300
+                {% elif inc.severity == 'medium' %}bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300
+                {% else %}bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300{% endif %}">
+                {{ inc.severity|upper }}
+              </span>
+            </td>
+            <td class="px-4 py-3">
+              {% if inc.agent_name %}
+                <span class="font-medium text-slate-800 dark:text-slate-200">{{ inc.agent_name }}</span>
+              {% else %}
+                <span class="text-slate-400">—</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3">
+              <span class="font-medium text-slate-800 dark:text-slate-200">{{ inc.assignee_name }}</span>
+            </td>
+            <td class="px-4 py-3 whitespace-nowrap">
+              {% if inc.status == 'open' %}
+                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-deny-muted text-deny">OPEN</span>
+              {% elif inc.status == 'investigating' %}
+                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-pending-muted text-pending">INVESTIGATING</span>
+              {% else %}
+                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-allow-muted text-allow">RESOLVED</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 whitespace-nowrap text-slate-500 font-mono text-[11px]">
+              {{ inc.created_at }}
+            </td>
+            <td class="px-4 py-3 text-right whitespace-nowrap">
+              <a href="/incidents/{{ inc.id }}" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-brand-50 hover:bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:hover:bg-brand-900/50 dark:text-brand-300 border border-brand-200 dark:border-brand-800 transition">
+                Chain View →
+              </a>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7" class="px-4 py-8 text-center text-slate-400">
+              No incidents reported. All agents within policy constraints.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Open Incident Modal -->
+  <div x-show="openModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" @click="openModal = false"></div>
+      <span class="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
+
+      <div class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full border border-slate-200 dark:border-slate-800 p-6">
+        <h3 class="text-base font-bold text-slate-900 dark:text-slate-100">Report Governance Incident</h3>
+        <p class="text-xs text-slate-500 mt-1">Open an incident for an incorrect output, breach, or anomalous action.</p>
+
+        <form method="post" action="/incidents" class="mt-4 space-y-4">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Incident Title</label>
+            <input type="text" name="title" required minlength="5" placeholder="e.g. Unauthorized PII export attempt"
+                   class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Related Agent</label>
+              <select name="agent_id" class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">None / External</option>
+                {% for ag in all_agents %}
+                <option value="{{ ag.id }}">{{ ag.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Severity</label>
+              <select name="severity" class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="medium">Medium</option>
+                <option value="high" selected>High</option>
+                <option value="critical">Critical</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Description & Evidence</label>
+            <textarea name="description" rows="4" required minlength="10" placeholder="Detail the anomaly, output, or policy violation observed…"
+                      class="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500"></textarea>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" @click="openModal = false" class="px-4 py-2 rounded-xl text-xs font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300">
+              Cancel
+            </button>
+            <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white shadow-sm transition">
+              Open Incident
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

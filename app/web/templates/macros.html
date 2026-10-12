@@ -1,0 +1,35 @@
+{# Shared UI macros — decision badges with icon + text (not color-only) #}
+
+{% macro decision_badge(value) -%}
+  {%- set v = (value or '')|string|lower -%}
+  {%- if v in ('allow', 'allowed', 'approved') -%}
+  <span class="aw-badge aw-badge-allow" role="status" aria-label="Decision: ALLOW">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+    ALLOW
+  </span>
+  {%- elif v in ('deny', 'denied', 'rejected') -%}
+  <span class="aw-badge aw-badge-deny" role="status" aria-label="Decision: DENY">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+    DENY
+  </span>
+  {%- elif v == 'escalated' -%}
+  <span class="aw-badge aw-badge-escalated" role="status" aria-label="Status: ESCALATED">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+    ESCALATED
+  </span>
+  {%- elif v in ('require_approval', 'pending', 'hold') -%}
+  <span class="aw-badge aw-badge-hold" role="status" aria-label="Decision: HOLD">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    HOLD
+  </span>
+  {%- else -%}
+  <span class="aw-badge aw-badge-neutral" role="status" aria-label="Status: {{ value }}">{{ value or '—' }}</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro verified_badge(label='VERIFIED') -%}
+  <span class="aw-badge aw-badge-verified" role="status" aria-label="{{ label }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+    {{ label }}
+  </span>
+{%- endmacro %}

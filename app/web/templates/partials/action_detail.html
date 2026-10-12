@@ -1,3 +1,4 @@
+{% from "macros.html" import decision_badge %}
 <div class="space-y-4">
   <div>
     <p class="text-xs text-slate-500">Agent · Tool</p>
@@ -10,10 +11,13 @@
   <div>
     <p class="text-xs text-slate-500 mb-1">Parameters</p>
     <pre class="text-xs bg-slate-50 dark:bg-slate-800 rounded-lg p-3 overflow-x-auto">{{ ar.params | tojson(indent=2) }}</pre>
+    {% if ar.params_hash %}
+    <p class="text-xs font-mono text-slate-500 mt-1 break-all">params_hash: {{ ar.params_hash }}</p>
+    {% endif %}
   </div>
   <div class="grid grid-cols-2 gap-3 text-sm">
     <div><p class="text-xs text-slate-500">Status</p><p class="font-medium">{{ ar.status }}</p></div>
-    <div><p class="text-xs text-slate-500">Decision</p><p class="font-medium">{{ ar.decision or '—' }}</p></div>
+    <div><p class="text-xs text-slate-500">Decision</p><div class="mt-0.5">{{ decision_badge(ar.decision or ar.status) }}</div></div>
     <div><p class="text-xs text-slate-500">Rule</p><p class="font-mono text-xs">{{ ar.matched_rule_id or '—' }}</p></div>
     <div><p class="text-xs text-slate-500">Policy v</p><p>{{ ar.policy_version or '—' }}</p></div>
   </div>
@@ -26,7 +30,7 @@
       <li class="text-xs">
         <div class="flex items-center gap-2 mb-1">
           {% if step.matched %}
-          <span class="w-4 h-4 rounded-full bg-allow text-white flex items-center justify-center text-[10px]">✓</span>
+          <span class="w-4 h-4 rounded-full bg-allow text-white flex items-center justify-center text-[10px]" aria-label="matched">✓</span>
           {% else %}
           <span class="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-300 flex items-center justify-center text-[10px]">–</span>
           {% endif %}

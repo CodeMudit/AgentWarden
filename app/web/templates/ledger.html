@@ -107,26 +107,30 @@ function ledgerVerify() {
 
       for (const block of blocks) {
         const seq = Number(block.dataset.block);
-        await new Promise(res => setTimeout(res, 40));
+        await new Promise(res => setTimeout(res, 55));
         const node = document.querySelector(`[data-node="${seq}"]`);
+        const linkBefore = document.querySelector(`[data-link-before="${seq}"]`);
         if (broken !== null && seq === broken) {
-          block.classList.add('ring-2', 'ring-deny');
-          if (node) node.classList.add('bg-deny', 'border-deny', 'scale-125');
+          block.classList.add('aw-fail', 'ring-2', 'ring-deny');
+          if (node) node.classList.add('aw-fail', 'bg-deny', 'border-deny', 'scale-125');
+          if (linkBefore) linkBefore.classList.add('aw-fail');
           const detail = document.querySelector(`[data-fail-detail="${seq}"]`);
           if (detail) {
             detail.classList.remove('hidden');
-            let msg = data.reason || 'hash mismatch';
+            let html = '<p class="font-semibold mb-1">' + (data.reason || 'hash mismatch') + '</p>';
             if (data.expected_hash && data.found_hash) {
-              msg += `\nexpected: ${data.expected_hash.slice(0, 16)}…\nfound:    ${data.found_hash.slice(0, 16)}…`;
+              html += '<div class="grid grid-cols-1 gap-1 mt-1"><div><span class="text-slate-600">expected</span><br/><code class="break-all">' + data.expected_hash + '</code></div>';
+              html += '<div><span class="text-slate-600">found</span><br/><code class="break-all">' + data.found_hash + '</code></div></div>';
             }
-            detail.textContent = msg;
+            detail.innerHTML = html;
           }
           block.scrollIntoView({ behavior: 'smooth', block: 'center' });
           break;
         }
         if (broken !== null && seq > broken) break;
-        block.classList.add('ring-2', 'ring-allow');
-        if (node) node.classList.add('bg-allow', 'border-allow');
+        block.classList.add('aw-ok', 'ring-2', 'ring-allow');
+        if (node) node.classList.add('aw-ok', 'bg-allow', 'border-allow');
+        if (linkBefore) linkBefore.classList.add('aw-ok');
       }
       this.running = false;
     }

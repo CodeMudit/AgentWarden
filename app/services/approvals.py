@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app import ledger
 from app.models import ActionRequest, Agent, User
+from app.tokens import issue_token
 
 
 class ApprovalError(Exception):
@@ -60,10 +61,25 @@ def approve(db: Session, action_id: int, user: User, reason: str) -> ActionReque
         actor_id=str(user.id),
         subject_type="action_request",
         subject_id=str(ar.id),
-        payload={"reason": reason.strip()},
+        payload={
+            "reason": reason.strip(),
+            "params_hash": ar.params_hash,
+            "tool": ar.tool,
+            "params": ar.params,
+        },
         policy_version=ar.policy_version,
         ts=now,
     )
+    if ar.params_hash:
+        token = issue_token(
+            db,
+            action_id=ar.id,
+            agent_id=ar.agent_id,
+            tool=ar.tool,
+            params_hash=ar.params_hash,
+            policy_version=ar.policy_version,
+        )
+        ar._decision_token = token  # type: ignore[attr-defined]
     db.flush()
     return ar
 

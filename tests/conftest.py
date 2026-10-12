@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import __version__, ledger
-from app.api import actions, agents, approvals, ledger_api, policies, system, users
+from app.api import actions, agents, approvals, ledger_api, policies, system, tokens, users
 from app.db import Base, get_db
 from app.models import User
 from app.security import (
@@ -117,6 +117,7 @@ def client(db_engine, db):
     app.include_router(ledger_api.router, prefix="/v1")
     app.include_router(system.router, prefix="/v1")
     app.include_router(users.router, prefix="/v1")
+    app.include_router(tokens.router, prefix="/v1")
     app.include_router(web_routes.router)
     app.dependency_overrides[get_db] = _override_get_db
 

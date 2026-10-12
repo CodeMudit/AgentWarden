@@ -1,0 +1,45 @@
+[
+ {
+  "t": 2.1,
+  "kind": "click",
+  "box": {
+   "x": 1662,
+   "y": 18.5,
+   "width": 53,
+   "height": 26
+  },
+  "note": "judge mode"
+ },
+ {
+  "t": 2.73,
+  "kind": "judge",
+  "note": "size 32->36"
+ },
+ {
+  "t": 4.62,
+  "kind": "click",
+  "box": {
+   "x": 13.5,
+   "y": 180,
+   "width": 260,
+   "height": 40.5
+  },
+  "note": "nav approval"
+ },
+ {
+  "t": 7.17,
+  "kind": "approve_buttons_disabled",
+  "note": "[true, true, true, true]"
+ },
+ {
+  "t": 7.69,
+  "kind": "focus",
+  "box": {
+   "x": 338.5,
+   "y": 573.25,
+   "width": 362,
+   "height": 40.5
+  },
+  "note": "owner: approve button state"
+ }
+]

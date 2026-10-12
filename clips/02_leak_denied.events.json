@@ -1,0 +1,51 @@
+[
+ {
+  "t": 2.09,
+  "kind": "click",
+  "box": {
+   "x": 1652,
+   "y": 18.5,
+   "width": 53,
+   "height": 26
+  },
+  "note": "judge mode"
+ },
+ {
+  "t": 2.72,
+  "kind": "judge",
+  "note": "size 32->36"
+ },
+ {
+  "t": 4.63,
+  "kind": "click",
+  "box": {
+   "x": 13.5,
+   "y": 360,
+   "width": 260,
+   "height": 49.5
+  },
+  "note": "nav demo lab"
+ },
+ {
+  "t": 7.78,
+  "kind": "click",
+  "box": {
+   "x": 338.5,
+   "y": 462,
+   "width": 70,
+   "height": 40.5
+  },
+  "note": "leak customer data"
+ },
+ {
+  "t": 10.3,
+  "kind": "focus",
+  "box": {
+   "x": 315,
+   "y": 380,
+   "width": 780,
+   "height": 294.5
+  },
+  "note": "leak customer data result"
+ }
+]

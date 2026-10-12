@@ -1,0 +1,84 @@
+[
+ {
+  "t": 2.08,
+  "kind": "click",
+  "box": {
+   "x": 1652,
+   "y": 18.5,
+   "width": 53,
+   "height": 26
+  },
+  "note": "judge mode"
+ },
+ {
+  "t": 2.71,
+  "kind": "judge",
+  "note": "size 32->36"
+ },
+ {
+  "t": 4.62,
+  "kind": "click",
+  "box": {
+   "x": 13.5,
+   "y": 360,
+   "width": 260,
+   "height": 49.5
+  },
+  "note": "nav demo lab"
+ },
+ {
+  "t": 7.78,
+  "kind": "click",
+  "box": {
+   "x": 338.5,
+   "y": 925,
+   "width": 70,
+   "height": 40.5
+  },
+  "note": "tamper"
+ },
+ {
+  "t": 10.31,
+  "kind": "focus",
+  "box": {
+   "x": 315,
+   "y": 843,
+   "width": 780,
+   "height": 240.5
+  },
+  "note": "tamper result"
+ },
+ {
+  "t": 13.92,
+  "kind": "click",
+  "box": {
+   "x": 13.5,
+   "y": 315,
+   "width": 260,
+   "height": 40.5
+  },
+  "note": "nav ledger"
+ },
+ {
+  "t": 17.27,
+  "kind": "click",
+  "box": {
+   "x": 315,
+   "y": 100,
+   "width": 140,
+   "height": 40.5
+  },
+  "note": "verify after tamper"
+ },
+ {
+  "t": 21.36,
+  "kind": "focus",
+  "box": {
+   "x": 1434.5,
+   "y": 22,
+   "width": 121.5,
+   "height": 27
+  },
+  "note": "expected|mismatch|broken|fail"
+ }
+]

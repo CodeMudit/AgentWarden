@@ -2,68 +2,160 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Audit Report · {{ agent.name if agent else 'All agents' }}</title>
+  <title>Governance Audit Report · {% if agent %}{{ agent.name }}{% else %}All Agents{% endif %}</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; color: #0f172a; line-height: 1.45; }
-    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
-    .meta { color: #64748b; font-size: 0.875rem; margin-bottom: 1.5rem; }
-    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
-    .ok { background: #dcfce7; color: #166534; }
-    .fail { background: #fee2e2; color: #991b1b; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 1rem 0; }
-    th, td { border-bottom: 1px solid #e2e8f0; padding: 0.5rem; text-align: left; }
-    th { color: #64748b; font-weight: 600; }
-    .hash { font-family: ui-monospace, monospace; font-size: 0.75rem; word-break: break-all; }
-    @media print { .no-print { display: none; } body { margin: 0.5in; } }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 1000px; margin: 2rem auto; color: #0f172a; line-height: 1.5; font-size: 13px; }
+    h1 { font-size: 1.75rem; margin-bottom: 0.25rem; font-weight: 700; color: #0f172a; }
+    h2 { font-size: 1.15rem; margin-top: 2rem; margin-bottom: 0.5rem; font-weight: 600; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.25rem; }
+    .meta { color: #64748b; font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; }
+    .ok { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .fail { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .breach { background: #fef2f2; color: #b91c1c; font-weight: bold; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 0.6rem 0.5rem; text-align: left; vertical-align: top; }
+    th { color: #475569; font-weight: 600; background: #f8fafc; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; word-break: break-all; }
+    .btn { display: inline-block; padding: 0.4rem 0.8rem; border-radius: 0.5rem; background: #4f46e5; color: white; text-decoration: none; font-weight: 600; font-size: 0.8rem; cursor: pointer; border: none; }
+    .btn-secondary { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+    .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 1rem; margin-bottom: 1rem; }
+    @media print { .no-print { display: none; } body { margin: 0.5in; font-size: 11px; } }
   </style>
 </head>
 <body>
-  <div class="no-print" style="margin-bottom:1rem">
-    <button onclick="window.print()">Print / Save as PDF</button>
-    <a href="/agents{% if agent %}/{{ agent.id }}{% endif %}">← Back</a>
+  <div class="no-print" style="margin-bottom:1.5rem; display: flex; gap: 0.5rem; align-items: center;">
+    <button class="btn" onclick="window.print()">Print / Save as PDF</button>
+    <a href="/audit/export?format=json{% if agent %}&agent_id={{ agent.id }}{% endif %}" class="btn btn-secondary" download="governance-audit-report.json">Download JSON Report</a>
+    <a href="{% if agent %}/agents/{{ agent.id }}{% else %}/leadership{% endif %}" class="btn btn-secondary">← Back</a>
   </div>
-  <h1>AgentWarden Audit Report</h1>
-  <p class="meta">
-    Generated {{ generated_at }}
-    {% if agent %}· Agent <strong>{{ agent.name }}</strong> (id {{ agent.id }}) · Owner {{ owner_name }}{% endif %}
-    · Policy verification:
-    <span class="badge {% if verify.ok %}ok{% else %}fail{% endif %}">
-      {% if verify.ok %}PASS · {{ verify.checked }} entries{% else %}FAIL at seq {{ verify.first_broken_seq }}{% endif %}
-    </span>
-  </p>
-  <p class="hash">Ledger head seq={{ head.last_seq }} · hash={{ head.last_hash }}</p>
 
-  <h2>Summary</h2>
+  <h1>AgentWarden Governance & Audit Report</h1>
+  <p class="meta">
+    Report Scope: <strong>{% if agent %}{{ agent.name }} (Agent ID {{ agent.id }}){% else %}Enterprise Organization (All AI Agents){% endif %}</strong> ·
+    Generated at {{ generated_at }}
+  </p>
+
+  <!-- Cryptographic Verification Box -->
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+      <strong>Append-Only Hash-Chained Ledger Verification:</strong>
+      <span class="badge {% if verify.ok %}ok{% else %}fail{% endif %}">
+        {% if verify.ok %}CHAIN INTACT · PASS ({{ verify.checked }} entries verified){% else %}TAMPER DETECTED · FAIL at seq {{ verify.first_broken_seq }}{% endif %}
+      </span>
+    </div>
+    <div class="hash">
+      Current Ledger Head: seq=<strong>{{ head.last_seq }}</strong> · hash={{ head.last_hash }}
+    </div>
+    {% if checkpoint %}
+    <div class="hash" style="margin-top: 0.25rem;">
+      Offline Checkpoint HMAC: {{ checkpoint.hmac }} (seq={{ checkpoint.seq }}) ·
+      Status: <span style="color: #166534; font-weight: bold;">{{ checkpoint_status }}</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <h2>1. Executive Summary</h2>
   <table>
-    <tr><th>Metric</th><th>Value</th></tr>
-    <tr><td>Total actions</td><td>{{ stats.total }}</td></tr>
-    <tr><td>Allowed / approved</td><td>{{ stats.allowed }}</td></tr>
-    <tr><td>Denied / rejected</td><td>{{ stats.denied }}</td></tr>
-    <tr><td>Still pending / escalated</td><td>{{ stats.pending }}</td></tr>
+    <tr><th>Metric</th><th>Count</th><th>Description</th></tr>
+    <tr><td>Total Action Requests</td><td><strong>{{ stats.total }}</strong></td><td>Requests evaluated through deterministic policy engine</td></tr>
+    <tr><td>Allowed & Executed</td><td><strong style="color: #166534;">{{ stats.allowed }}</strong></td><td>Actions authorized automatically or via human approval</td></tr>
+    <tr><td>Denied by Policy</td><td><strong style="color: #991b1b;">{{ stats.denied }}</strong></td><td>Actions blocked by default-deny rules or policy boundaries</td></tr>
+    <tr><td>Human Approvals Granted</td><td><strong>{{ stats.approved }}</strong></td><td>Requiring independent non-owner reviewer approval</td></tr>
+    <tr><td>Policy Breaches Detected</td><td><strong style="color: #991b1b;">{{ stats.breaches }}</strong></td><td>Actions touching unpermitted tools or unauthorized data scopes</td></tr>
+    <tr><td>Active / Total Incidents</td><td><strong>{{ stats.open_incidents }} / {{ stats.total_incidents }}</strong></td><td>Human accountability incident cases</td></tr>
   </table>
 
-  <h2>Decisions</h2>
+  <h2>2. Agent Registry Snapshot</h2>
   <table>
     <thead>
       <tr>
-        <th>Time</th><th>Tool</th><th>Decision</th><th>Rule</th><th>Approver</th><th>Reason</th>
+        <th>Agent Name</th><th>Owner</th><th>Risk Tier</th><th>Permitted Tools</th><th>Data Scopes</th><th>Status</th>
       </tr>
     </thead>
     <tbody>
-      {% for row in rows %}
+      {% for ag in agents_snapshot %}
       <tr>
-        <td>{{ row.ts }}</td>
-        <td>{{ row.tool }}</td>
-        <td>{{ row.decision }}</td>
-        <td class="hash">{{ row.rule or '—' }}</td>
-        <td>{{ row.approver or '—' }}</td>
-        <td>{{ row.reason or '—' }}</td>
+        <td><strong>{{ ag.name }}</strong><br><span style="color: #64748b; font-size: 0.75rem;">{{ ag.purpose }}</span></td>
+        <td>{{ ag.owner_name }}<br><span style="color: #64748b; font-size: 0.75rem;">{{ ag.owner_email }}</span></td>
+        <td><span class="badge ok">{{ ag.risk_category|upper }}</span></td>
+        <td class="hash">{{ ag.permitted_actions|join(", ") if ag.permitted_actions else "Wildcard" }}</td>
+        <td>{{ ag.data_access|join(", ") if ag.data_access else "All" }}</td>
+        <td><strong>{{ ag.status|upper }}</strong>{% if ag.status_reason %}<br><span style="color: #991b1b; font-size: 0.75rem;">{{ ag.status_reason }}</span>{% endif %}</td>
       </tr>
-      {% else %}
-      <tr><td colspan="6">No actions in range</td></tr>
       {% endfor %}
     </tbody>
   </table>
-  <p class="meta">AgentWarden · deterministic policy · hash-chained ledger · human accountability</p>
+
+  <h2>3. Human Approvals & Written Reasons (Separation of Duties)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Action ID</th><th>Tool</th><th>Agent & Owner</th><th>Independent Approver</th><th>Decided At</th><th>Written Reason Given</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for app in approvals_log %}
+      <tr>
+        <td class="hash">#{{ app.action_id }}</td>
+        <td class="hash"><strong>{{ app.tool }}</strong></td>
+        <td>{{ app.agent_name }} (Owner: {{ app.owner_name }})</td>
+        <td><strong>{{ app.approver_name }}</strong></td>
+        <td>{{ app.decided_at }}</td>
+        <td style="font-style: italic;">"{{ app.reason }}"</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color: #64748b; text-align: center;">No human approvals recorded in this scope.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>4. Policy Breaches & Automatic Agent Pauses</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th><th>Agent</th><th>Triggering Tool</th><th>Scope Violation / Breach Reason</th><th>Action Taken</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for br in breaches_log %}
+      <tr class="breach">
+        <td>{{ br.ts }}</td>
+        <td><strong>{{ br.agent_name }}</strong></td>
+        <td class="hash">{{ br.tool }}</td>
+        <td>{{ br.reason }}</td>
+        <td><strong>{{ br.action_taken }}</strong></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="color: #64748b; text-align: center;">Zero policy breaches. All agents operating within permissions.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>5. Governance Incidents & Human Accountability</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Incident ID</th><th>Severity</th><th>Title</th><th>Responsible Agent & Owner</th><th>Status</th><th>Resolution Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inc in incidents_log %}
+      <tr>
+        <td class="hash">#{{ inc.id }}</td>
+        <td><span class="badge {% if inc.severity == 'critical' %}fail{% else %}ok{% endif %}">{{ inc.severity|upper }}</span></td>
+        <td><strong>{{ inc.title }}</strong><br><span style="color: #64748b; font-size: 0.75rem;">{{ inc.description }}</span></td>
+        <td>{{ inc.agent_name }} (Owner: {{ inc.owner_name }})</td>
+        <td><strong>{{ inc.status|upper }}</strong></td>
+        <td>{{ inc.resolution_notes or "Under Active Human Review" }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color: #64748b; text-align: center;">No incidents filed.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="meta" style="margin-top: 3rem; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 1rem;">
+    AgentWarden · PS5 AI Agent Governance & Human Accountability Operating System · SHA-256 Ledger Verified
+  </p>
 </body>
 </html>

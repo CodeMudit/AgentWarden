@@ -1,35 +1,61 @@
 {% extends "base.html" %}
 {% block title %}Register Agent · AgentWarden{% endblock %}
-{% block page_title %}Register agent{% endblock %}
+{% block page_title %}Register Agent{% endblock %}
 {% block content %}
-<div class="max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+<div class="max-w-xl rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+  {% if error %}
+  <div class="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300">
+    {{ error }}
+  </div>
+  {% endif %}
   <form method="post" action="/agents/new" class="space-y-4">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div>
-      <label class="block text-sm font-medium mb-1">Name</label>
-      <input name="name" required maxlength="128" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" placeholder="refund-bot" />
+      <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Agent Name</label>
+      <input name="name" required maxlength="128" class="w-full text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100" placeholder="e.g. support-refund-agent" />
     </div>
     <div>
-      <label class="block text-sm font-medium mb-1">Purpose</label>
-      <textarea name="purpose" rows="2" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm"></textarea>
+      <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Purpose & Business Mission</label>
+      <textarea name="purpose" rows="2" class="w-full text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100" placeholder="Validates and processes customer return refund requests"></textarea>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Accountable Human Owner</label>
+        <select name="owner_user_id" required class="w-full text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100">
+          {% for u in owners %}
+          <option value="{{ u.id }}">{{ u.name }} ({{ u.email }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Risk Category</label>
+        <select name="risk_tier" class="w-full text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100">
+          <option value="low">Low (Read-only / advisory)</option>
+          <option value="medium" selected>Medium (Standard operations)</option>
+          <option value="high">High (Financial / write actions)</option>
+          <option value="critical">Critical (Infrastructure / security)</option>
+        </select>
+      </div>
     </div>
     <div>
-      <label class="block text-sm font-medium mb-1">Owner</label>
-      <select name="owner_user_id" required class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
-        {% for u in owners %}
-        <option value="{{ u.id }}">{{ u.name }} ({{ u.email }})</option>
-        {% endfor %}
-      </select>
+      <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Permitted Actions (Tools whitelist, comma-separated)</label>
+      <input name="permitted_actions_csv" class="w-full text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 font-mono" placeholder="issue_refund, lookup_order, check_status" />
+      <p class="text-[11px] text-slate-400 mt-0.5">Calls to tools outside this list will trigger an automatic policy breach and pause the agent.</p>
     </div>
     <div>
-      <label class="block text-sm font-medium mb-1">Risk tier</label>
-      <select name="risk_tier" class="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
-        <option value="low">low</option>
-        <option value="medium" selected>medium</option>
-        <option value="high">high</option>
-      </select>
+      <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Data Access Scopes (Comma-separated)</label>
+      <input name="data_access_csv" class="w-full text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 font-mono" placeholder="orders:read, refunds:write, internal" />
+      <p class="text-[11px] text-slate-400 mt-0.5">Requests touching unauthorized scopes will be blocked and recorded in ledger.</p>
     </div>
-    <button type="submit" class="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700">Create agent</button>
+    <div>
+      <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Estimated Cost Per Call (USD)</label>
+      <input type="number" step="0.001" min="0" name="cost_per_call" value="0.01" class="w-32 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 font-mono" />
+    </div>
+    <div class="pt-2">
+      <button type="submit" class="rounded-xl bg-brand-600 text-white px-5 py-2 text-xs font-semibold hover:bg-brand-700 transition shadow-sm">
+        Register Agent & Issue Key
+      </button>
+    </div>
   </form>
 </div>
 {% endblock %}

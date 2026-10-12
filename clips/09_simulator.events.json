@@ -1,0 +1,40 @@
+[
+ {
+  "t": 2.58,
+  "kind": "click",
+  "box": {
+   "x": 1634.75,
+   "y": 18.5,
+   "width": 53.65625,
+   "height": 26
+  },
+  "note": "judge mode"
+ },
+ {
+  "t": 3.22,
+  "kind": "judge",
+  "note": "size 32->36"
+ },
+ {
+  "t": 4.83,
+  "kind": "click",
+  "box": {
+   "x": 13.5,
+   "y": 360,
+   "width": 260,
+   "height": 49.5
+  },
+  "note": "nav demo lab"
+ },
+ {
+  "t": 6.2,
+  "kind": "focus",
+  "box": {
+   "x": 315,
+   "y": 99,
+   "width": 1563,
+   "height": 22.5
+  },
+  "note": "simulat"
+ }
+]

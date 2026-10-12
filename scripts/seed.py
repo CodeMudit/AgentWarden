@@ -21,9 +21,22 @@ from sqlalchemy import delete, select
 
 from app import ledger
 from app.db import SessionLocal, init_db
-from app.models import ActionRequest, Agent, LedgerEntry, LedgerHead, Policy, SystemState, User
+from app.models import (
+    ActionRequest,
+    Agent,
+    DecisionToken,
+    ExceptionCase,
+    Incident,
+    LedgerEntry,
+    LedgerHead,
+    Policy,
+    SystemState,
+    User,
+    WorkItem,
+)
 from app.security import generate_api_key, hash_password
 from app.services import actions as actions_svc
+from app.services.work_allocation import route_work_item
 
 console = Console()
 
@@ -36,6 +49,15 @@ DEMO_POLICY = {
             "description": "Deny refund bursts over 5/min",
             "match": {"agents": ["refund-bot"], "tools": ["issue_refund"]},
             "conditions": [{"type": "rate_limit", "value": {"max": 5, "window_seconds": 60}}],
+            "effect": "deny",
+        },
+        {
+            "id": "block-restricted-pii-scope",
+            "priority": 4,
+            "description": "Block actions attempting to touch restricted PII data scopes",
+            "conditions": [
+                {"type": "data_scope_in", "value": ["restricted:ssn", "restricted:cc_number"]},
+            ],
             "effect": "deny",
         },
         {
@@ -74,13 +96,39 @@ DEMO_POLICY = {
             ],
             "effect": "allow",
         },
+        {
+            "id": "sql-analytics-allow",
+            "priority": 12,
+            "match": {"agents": ["sql-analytics-agent"], "tools": ["run_readonly_query", "export_csv"]},
+            "conditions": [],
+            "effect": "allow",
+        },
+        {
+            "id": "remediation-critical-review",
+            "priority": 8,
+            "match": {"agents": ["auto-remediation-bot"], "tools": ["rollback_deployment", "restart_service"]},
+            "conditions": [],
+            "effect": "require_approval",
+        },
     ],
 }
 
 
 def reset_db(db) -> None:
     console.print("[yellow]Resetting all data…[/yellow]")
-    for table in (ActionRequest, LedgerEntry, Agent, Policy, User, SystemState, LedgerHead):
+    for table in (
+        Incident,
+        ExceptionCase,
+        WorkItem,
+        DecisionToken,
+        ActionRequest,
+        LedgerEntry,
+        Agent,
+        Policy,
+        User,
+        SystemState,
+        LedgerHead,
+    ):
         db.execute(delete(table))
     db.commit()
     ledger.ensure_genesis(db)
@@ -119,13 +167,46 @@ def seed_agents(db, users: dict[str, User]) -> dict[str, tuple[Agent, str]]:
     """Return name -> (agent, api_key)."""
     result = {}
     specs = [
-        ("refund-bot", "Issues customer refunds", users["reviewer_a@demo.local"].id, "medium"),
-        ("email-assistant", "Sends customer emails", users["reviewer_b@demo.local"].id, "high"),
+        (
+            "refund-bot",
+            "Issues and validates customer order refunds within authorized limits",
+            users["reviewer_a@demo.local"].id,
+            "medium",
+            ["issue_refund", "send_email", "lookup_order", "check_order_status"],
+            ["orders:read", "refunds:write", "internal"],
+            0.05,
+        ),
+        (
+            "email-assistant",
+            "Drafts and sends customer correspondence and team updates",
+            users["reviewer_b@demo.local"].id,
+            "high",
+            ["send_email", "fetch_inbox", "search_contacts"],
+            ["company.com", "internal"],
+            0.02,
+        ),
+        (
+            "sql-analytics-agent",
+            "Executes read-only operational and financial reporting queries",
+            users["admin@demo.local"].id,
+            "low",
+            ["run_readonly_query", "export_csv"],
+            ["analytics_db:read", "reporting"],
+            0.01,
+        ),
+        (
+            "auto-remediation-bot",
+            "Automated infrastructure recovery and rollbacks upon incident alerts",
+            users["admin2@demo.local"].id,
+            "critical",
+            ["restart_service", "rollback_deployment", "flush_cache"],
+            ["prod_infra", "restricted"],
+            0.15,
+        ),
     ]
-    for name, purpose, owner_id, tier in specs:
+    for name, purpose, owner_id, risk_cat, permitted, data_scopes, cost in specs:
         existing = db.execute(select(Agent).where(Agent.name == name)).scalar_one_or_none()
         if existing:
-            # Can't recover full key – generate new for seed re-run of history only if missing
             result[name] = (existing, None)
             continue
         full, prefix, key_hash = generate_api_key()
@@ -133,7 +214,11 @@ def seed_agents(db, users: dict[str, User]) -> dict[str, tuple[Agent, str]]:
             name=name,
             purpose=purpose,
             owner_user_id=owner_id,
-            risk_tier=tier,
+            risk_category=risk_cat,
+            risk_tier=risk_cat,
+            permitted_actions=permitted,
+            data_access=data_scopes,
+            cost_per_call=cost,
             status="active",
             api_key_prefix=prefix,
             api_key_hash=key_hash,
@@ -147,7 +232,12 @@ def seed_agents(db, users: dict[str, User]) -> dict[str, tuple[Agent, str]]:
             actor_id=str(owner_id),
             subject_type="agent",
             subject_id=str(agent.id),
-            payload={"name": name},
+            payload={
+                "name": name,
+                "risk_category": risk_cat,
+                "permitted_actions": permitted,
+                "data_access": data_scopes,
+            },
         )
         result[name] = (agent, full)
     db.commit()
@@ -165,7 +255,7 @@ def seed_policy(db, admin: User) -> Policy:
         rules=DEMO_POLICY,
         is_active=True,
         created_by=admin.id,
-        note="Demo seed policy",
+        note="Demo seed policy with PS5 governance data scopes",
     )
     db.add(p)
     db.flush()
@@ -204,6 +294,7 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
 
     refund_bot = agents["refund-bot"][0]
     email_bot = agents["email-assistant"][0]
+    sql_bot = agents.get("sql-analytics-agent", (None, None))[0]
     now = datetime.now(UTC)
     rng = random.Random(42)
 
@@ -211,7 +302,7 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
     for i in range(n):
         roll = rng.random()
         ts = now - timedelta(hours=rng.randint(1, 168), minutes=rng.randint(0, 59))
-        if roll < 0.45:
+        if roll < 0.40:
             amount = rng.choice([10, 25, 40, 50, 75, 90, 100])
             scenarios.append(
                 (
@@ -219,10 +310,11 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
                     "issue_refund",
                     {"amount": amount, "order_id": f"ORD-{1000 + i}"},
                     "internal",
+                    ["orders:read", "refunds:write"],
                     ts,
                 )
             )
-        elif roll < 0.65:
+        elif roll < 0.60:
             amount = rng.choice([150, 200, 350, 500, 900, 1200])
             scenarios.append(
                 (
@@ -230,32 +322,45 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
                     "issue_refund",
                     {"amount": amount, "order_id": f"ORD-{2000 + i}"},
                     "internal",
+                    ["orders:read", "refunds:write"],
                     ts,
                 )
             )
-        elif roll < 0.80:
+        elif roll < 0.75:
             scenarios.append(
                 (
                     email_bot,
                     "send_email",
                     {"to": "customer@gmail.com", "subject": "Customer Export"},
                     "pii",
+                    ["customer_db:read"],
                     ts,
                 )
             )
-        else:
+        elif roll < 0.90:
             scenarios.append(
                 (
                     email_bot,
                     "send_email",
-                    {"to": "alice@company.com", "subject": f"Update {i}"},
+                    {"to": "alice@company.com", "subject": f"Weekly Status {i}"},
                     "internal",
+                    ["company.com"],
+                    ts,
+                )
+            )
+        elif sql_bot:
+            scenarios.append(
+                (
+                    sql_bot,
+                    "run_readonly_query",
+                    {"query": "SELECT count(*) FROM orders WHERE status = 'delivered'"},
+                    "internal",
+                    ["analytics_db:read", "reporting"],
                     ts,
                 )
             )
 
-    # Sort by time so rate limits and chronology make sense
-    scenarios.sort(key=lambda x: x[4])
+    scenarios.sort(key=lambda x: x[5])
 
     from app.models import User as UserModel
     from app.services.approvals import approve, reject
@@ -268,27 +373,28 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
     ).scalar_one()
 
     created = 0
-    for agent, tool, params, sensitivity, ts in scenarios:
+    for agent, tool, params, sensitivity, data_used, ts in scenarios:
         ar = actions_svc.request_action(
-            db, agent=agent, tool=tool, params=params, sensitivity=sensitivity
+            db,
+            agent=agent,
+            tool=tool,
+            params=params,
+            sensitivity=sensitivity,
+            data_used=data_used,
         )
-        # Backdate created_at for charts
         ar.created_at = ts
         if ar.status == "pending":
-            # Auto-resolve some historical pendings so queue isn't full of ancient items
             if rng.random() < 0.7:
                 try:
-                    # owner of refund-bot is reviewer_a → use reviewer_b
                     owner_id = agent.owner_user_id
                     decider = reviewer_b if owner_id == reviewer_a.id else reviewer_a
                     if rng.random() < 0.6:
-                        approve(db, ar.id, decider, "Historical seed approval – looks legitimate")
+                        approve(db, ar.id, decider, "Historical seed approval – verified customer request")
                     else:
                         reject(db, ar.id, decider, "Historical seed rejection – policy review")
                 except Exception:
                     pass
             else:
-                # leave a couple pending only if recent
                 if (now - ts).total_seconds() > 3600:
                     ar.status = "approved"
                     ar.decision = "allow"
@@ -299,12 +405,73 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
     console.print(f"[green]Created {created} historical action requests[/green]")
 
 
-def func_count_actions(db):
-    from sqlalchemy import func
+def seed_work_allocation_and_incidents(db, users: dict[str, User], agents: dict[str, tuple[Agent, str | None]]) -> None:
+    """Seed work items (human-vs-agent allocation) and sample incidents."""
+    refund_bot = agents["refund-bot"][0]
+    email_bot = agents["email-assistant"][0]
+    reviewer_a = users["reviewer_a@demo.local"]
+    reviewer_b = users["reviewer_b@demo.local"]
 
-    from app.models import ActionRequest
+    # Seed 10 work items using route_task
+    task_specs = [
+        ("Process small return $15", "refunds", "low", 0.96, refund_bot.id),
+        ("Verify damaged item photo", "refunds", "medium", 0.88, refund_bot.id),
+        ("High-value claim $3,200", "refunds", "critical", 0.52, refund_bot.id),
+        ("VIP corporate refund request", "refunds", "high", 0.61, refund_bot.id),
+        ("Standard invoice lookup", "operations", "low", 0.98, refund_bot.id),
+        ("Draft standard thank-you email", "communications", "low", 0.94, email_bot.id),
+        ("Legal compliance notice draft", "communications", "critical", 0.45, email_bot.id),
+        ("GDPR erasure request processing", "compliance", "critical", 0.38, None),
+        ("Routine inventory reconciliation", "operations", "low", 0.92, None),
+        ("Suspicious chargeback dispute", "fraud", "high", 0.58, refund_bot.id),
+    ]
 
-    return select(func.count()).select_from(ActionRequest)
+    for title, task_type, risk, confidence, agent_id in task_specs:
+        route_work_item(
+            db,
+            title=title,
+            task_type=task_type,
+            risk_category=risk,
+            confidence_score=confidence,
+            preferred_agent_id=agent_id,
+            preferred_user_id=reviewer_b.id if risk in ("high", "critical") else None,
+        )
+
+    # Seed 1 resolved incident for audit proof
+    inc = Incident(
+        title="Unauthorized SSN Data Field Access Attempt",
+        description="Refund Bot attempted to read customer SSN and credit card numbers during refund lookup.",
+        severity="high",
+        status="resolved",
+        agent_id=refund_bot.id,
+        created_by_user_id=reviewer_a.id,
+        assigned_user_id=reviewer_a.id,
+        resolution_notes="Audited refund prompt templates. Enforced restricted PII block policy and re-verified agent data scope.",
+        resolved_at=datetime.now(UTC),
+    )
+    db.add(inc)
+    db.flush()
+
+    ledger.append(
+        db,
+        event_type="incident_opened",
+        actor_type="system",
+        actor_id="breach_engine",
+        subject_type="incident",
+        subject_id=str(inc.id),
+        payload={"title": inc.title, "agent_id": refund_bot.id, "severity": inc.severity},
+    )
+    ledger.append(
+        db,
+        event_type="incident_resolved",
+        actor_type="user",
+        actor_id=str(reviewer_a.id),
+        subject_type="incident",
+        subject_id=str(inc.id),
+        payload={"resolution_notes": inc.resolution_notes},
+    )
+    db.commit()
+    console.print("[green]Seeded work allocation tasks and accountability incident[/green]")
 
 
 def main() -> None:
@@ -332,6 +499,7 @@ def main() -> None:
         policy = seed_policy(db, users["admin@demo.local"])
         console.print(f"  Policy v{policy.version} active")
         seed_history(db, agents, n=50)
+        seed_work_allocation_and_incidents(db, users, agents)
 
         console.print("\n[bold green]Seed complete.[/bold green]")
         console.print("Demo logins:")

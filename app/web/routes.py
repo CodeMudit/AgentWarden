@@ -1,5 +1,3 @@
-"""HTML routes: auth, pages, HTMX partials."""
-
 from __future__ import annotations
 
 import json
@@ -14,9 +12,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import ledger
+from app.api.activity_api import redact_params
 from app.config import get_settings
 from app.db import get_db
-from app.models import ActionRequest, Agent, LedgerEntry, Policy, User
+from app.models import (
+    ActionRequest,
+    Agent,
+    Incident,
+    LedgerEntry,
+    Policy,
+    User,
+)
 from app.policy.engine import validate_policy
 from app.policy.simulator import simulate
 from app.security import (
@@ -33,14 +39,23 @@ from app.security import (
     verify_password,
 )
 from app.services import approvals as approvals_svc
-from app.services.approvals import ApprovalError
+from app.services.approvals import ApprovalError, approve
+from app.services.incidents import (
+    IncidentError,
+    get_accountability_chain,
+    open_incident,
+    resolve_incident,
+)
 from app.services.killswitch import (
     freeze_system,
     get_system_state,
+    pause_agent,
+    restrict_agent,
     resume_agent,
     suspend_agent,
     unfreeze_system,
 )
+from app.services.work_allocation import get_allocation_metrics
 
 router = APIRouter(tags=["web"])
 
@@ -417,6 +432,7 @@ def action_detail(
         "tool": ar.tool,
         "summary": ar.summary,
         "params": ar.params or {},
+        "params_hash": getattr(ar, "params_hash", None),
         "status": ar.status,
         "decision": ar.decision,
         "matched_rule_id": ar.matched_rule_id,
@@ -480,6 +496,11 @@ def approvals_page(
         if ar.sla_deadline:
             dl = ar.sla_deadline if ar.sla_deadline.tzinfo else ar.sla_deadline.replace(tzinfo=UTC)
             sla_rem = max(0, int((dl - now).total_seconds()))
+        owner_name = None
+        if agent is not None:
+            from app.models import User as _User
+            ou = db.execute(select(_User).where(_User.id == agent.owner_user_id)).scalar_one_or_none()
+            owner_name = ou.name if ou else None
         items.append(
             {
                 "id": ar.id,
@@ -492,6 +513,10 @@ def approvals_page(
                 "sensitivity": ar.sensitivity,
                 "sla_remaining": sla_rem,
                 "is_owner": agent is not None and agent.owner_user_id == user.id,
+                "params": ar.params or {},
+                "params_hash": getattr(ar, "params_hash", None),
+                "matched_rule_id": ar.matched_rule_id,
+                "owner_name": owner_name,
             }
         )
     pending_count = (
@@ -526,7 +551,7 @@ def approvals_page(
 def web_approve(
     action_id: int,
     request: Request,
-    reason: str = Form(...),
+    reason: str = Form(""),
     csrf_token: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_web_user),
@@ -534,6 +559,8 @@ def web_approve(
     verify_csrf(request, csrf_token)
     if user.role == "auditor":
         return RedirectResponse("/approvals?toast=Auditors+are+read-only", status_code=303)
+    if len(reason.strip()) < 10:
+        return RedirectResponse("/approvals?toast=Reason+must+be+at+least+10+characters", status_code=303)
     try:
         approvals_svc.approve(db, action_id, user, reason)
         db.commit()
@@ -547,7 +574,7 @@ def web_approve(
 def web_reject(
     action_id: int,
     request: Request,
-    reason: str = Form(...),
+    reason: str = Form(""),
     csrf_token: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_web_user),
@@ -555,6 +582,8 @@ def web_reject(
     verify_csrf(request, csrf_token)
     if user.role == "auditor":
         return RedirectResponse("/approvals?toast=Auditors+are+read-only", status_code=303)
+    if len(reason.strip()) < 10:
+        return RedirectResponse("/approvals?toast=Reason+must+be+at+least+10+characters", status_code=303)
     try:
         approvals_svc.reject(db, action_id, user, reason)
         db.commit()
@@ -616,6 +645,9 @@ def agent_create(
     purpose: str = Form(""),
     owner_user_id: int = Form(...),
     risk_tier: str = Form("medium"),
+    permitted_actions_csv: str = Form(""),
+    data_access_csv: str = Form(""),
+    cost_per_call: float = Form(0.01),
     csrf_token: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_web_user),
@@ -623,12 +655,31 @@ def agent_create(
     verify_csrf(request, csrf_token)
     if user.role != "admin":
         return RedirectResponse("/agents", status_code=303)
+
+    clean_name = name.strip()
+    existing = db.execute(select(Agent).where(Agent.name == clean_name)).scalar_one_or_none()
+    if existing:
+        owners = list(db.execute(select(User).where(User.is_active.is_(True))).scalars().all())
+        return templates.TemplateResponse(
+            request,
+            "agent_new.html",
+            _ctx(request, db, owners=owners, error=f"Agent '{clean_name}' already exists. Please choose a unique name."),
+            status_code=400,
+        )
+
+    permitted = [a.strip() for a in permitted_actions_csv.split(",") if a.strip()]
+    scopes = [s.strip() for s in data_access_csv.split(",") if s.strip()]
+
     full, prefix, key_hash = generate_api_key()
     agent = Agent(
-        name=name.strip(),
+        name=clean_name,
         purpose=purpose,
         owner_user_id=owner_user_id,
         risk_tier=risk_tier,
+        risk_category=risk_tier,
+        permitted_actions=permitted,
+        data_access=scopes,
+        cost_per_call=cost_per_call,
         status="active",
         api_key_prefix=prefix,
         api_key_hash=key_hash,
@@ -642,7 +693,13 @@ def agent_create(
         actor_id=str(user.id),
         subject_type="agent",
         subject_id=str(agent.id),
-        payload={"name": agent.name},
+        payload={
+            "name": agent.name,
+            "risk_category": risk_tier,
+            "permitted_actions": permitted,
+            "data_access": scopes,
+            "cost_per_call": cost_per_call,
+        },
     )
     db.commit()
     db.refresh(agent)
@@ -668,23 +725,6 @@ def web_suspend(
         db.commit()
     return RedirectResponse("/agents?toast=Agent+suspended", status_code=303)
 
-
-@router.post("/agents/{agent_id}/resume")
-def web_resume(
-    agent_id: int,
-    request: Request,
-    csrf_token: str = Form(""),
-    db: Session = Depends(get_db),
-    user: User = Depends(require_web_user),
-):
-    verify_csrf(request, csrf_token)
-    if user.role != "admin":
-        return RedirectResponse("/agents", status_code=303)
-    agent = db.execute(select(Agent).where(Agent.id == agent_id)).scalar_one_or_none()
-    if agent:
-        resume_agent(db, agent, by=str(user.id))
-        db.commit()
-    return RedirectResponse("/agents?toast=Agent+resumed", status_code=303)
 
 
 @router.get("/agents/{agent_id}", response_class=HTMLResponse)
@@ -1029,21 +1069,21 @@ def demo_lab_run(
     verify_csrf(request, request.headers.get("X-CSRF-Token"))
 
     from app.services import actions as actions_svc
-    from app.services.approvals import ApprovalError, approve
+    from app.services.approvals import ApprovalError
     from scripts.tamper import repair, tamper
 
     refund = db.execute(select(Agent).where(Agent.name == "refund-bot")).scalar_one_or_none()
     if refund is None:
         return JSONResponse({"error": "refund-bot not found – run seed"}, status_code=400)
 
-    if scenario == "small":
+    if scenario in ("small", "allow"):
         ar = actions_svc.request_action(
             db, agent=refund, tool="issue_refund", params={"amount": 40}, sensitivity="internal"
         )
         db.commit()
         return {"id": ar.id, "decision": ar.decision, "status": ar.status, "reason": ar.reason}
 
-    if scenario == "large":
+    if scenario in ("large", "pending"):
         ar = actions_svc.request_action(
             db, agent=refund, tool="issue_refund", params={"amount": 900}, sensitivity="internal"
         )
@@ -1055,7 +1095,7 @@ def demo_lab_run(
             "message": "Go to Approvals as reviewer_b to approve",
         }
 
-    if scenario == "leak":
+    if scenario in ("leak", "deny"):
         ar = actions_svc.request_action(
             db,
             agent=refund,
@@ -1081,7 +1121,7 @@ def demo_lab_run(
         db.commit()
         return {"results": results}
 
-    if scenario == "overdue":
+    if scenario in ("overdue", "escalate"):
         ar = actions_svc.request_action(
             db,
             agent=refund,
@@ -1106,7 +1146,7 @@ def demo_lab_run(
         db.commit()
         owner = db.execute(select(User).where(User.id == refund.owner_user_id)).scalar_one()
         try:
-            approve(db, ar.id, owner, "Trying to self-approve as owner which should fail")
+            approvals_svc.approve(db, ar.id, owner, "Trying to self-approve as owner which should fail")
             db.commit()
             return {"error": "unexpected success"}
         except ApprovalError as e:
@@ -1172,6 +1212,61 @@ def demo_lab_run(
             "simulation": sim,
         }
 
+<<<<<<< HEAD
+=======
+    if scenario == "ps5_governance":
+        # Step 1: Ensure agent is active for the test
+        if refund.status == "paused":
+            resume_agent(db, refund, by=str(user.id), reason="Resetting for PS5 governance demo")
+            db.commit()
+            db.refresh(refund)
+
+        # Step 2: Agent attempts an unpermitted tool call (export_customer_pii) with sensitive data
+        ar1 = actions_svc.request_action(
+            db,
+            agent=refund,
+            tool="export_customer_pii",
+            params={"customer_id": "CUST-9912", "fields": ["ssn", "cc_number"]},
+            sensitivity="restricted",
+            data_used=["restricted:ssn", "restricted:cc_number"],
+        )
+        db.commit()
+        db.refresh(refund)
+        breach_caught = getattr(ar1, "is_breach", False) or ar1.decision == "deny"
+        breach_error_message = ar1.reason or "Policy breach detected"
+
+        # Step 3: Verify agent was automatically paused
+        agent_auto_paused = (refund.status == "paused")
+
+        # Step 4: Verify subsequent actions are immediately denied due to paused state
+        ar2 = actions_svc.request_action(
+            db,
+            agent=refund,
+            tool="issue_refund",
+            params={"amount": 25},
+            sensitivity="internal",
+        )
+        db.commit()
+        subsequent_denied = (ar2.decision == "deny" and "paused" in (ar2.reason or "").lower())
+
+        # Step 5: Query the Incident created for this breach
+        inc = db.execute(
+            select(Incident).where(Incident.agent_id == refund.id).order_by(Incident.created_at.desc())
+        ).scalars().first()
+
+        return {
+            "story": "PS5 Demo: Refund Bot attempted unpermitted action 'export_customer_pii' on restricted PII data.",
+            "policy_breach_detected": breach_caught,
+            "breach_message": breach_error_message,
+            "agent_auto_paused": agent_auto_paused,
+            "subsequent_action_blocked": subsequent_denied,
+            "incident_id": inc.id if inc else None,
+            "incident_severity": inc.severity if inc else None,
+            "message": "Policy breach detected! Agent automatically PAUSED, incident opened, and all subsequent calls blocked.",
+            "next_step": "Visit Incidents page to view the full accountability chain or Agent page to resume with authorization.",
+        }
+
+>>>>>>> a981b25 (New Updates)
     return JSONResponse({"error": f"unknown scenario {scenario}"}, status_code=400)
 
 
@@ -1193,7 +1288,6 @@ def approvals_list_partial(
     db: Session = Depends(get_db),
     user: User = Depends(require_web_user),
 ):
-    # Reuse same data building as approvals_page
     status_filter = "escalated" if tab == "escalated" else "pending"
     rows = list(
         db.execute(
@@ -1205,14 +1299,19 @@ def approvals_list_partial(
         .all()
     )
     agents = {a.id: a for a in db.execute(select(Agent)).scalars().all()}
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     items = []
     for ar in rows:
         agent = agents.get(ar.agent_id)
         sla_rem = None
         if ar.sla_deadline:
-            dl = ar.sla_deadline if ar.sla_deadline.tzinfo else ar.sla_deadline.replace(tzinfo=timezone.utc)
+            dl = ar.sla_deadline if ar.sla_deadline.tzinfo else ar.sla_deadline.replace(tzinfo=UTC)
             sla_rem = max(0, int((dl - now).total_seconds()))
+        owner_name = None
+        if agent is not None:
+            from app.models import User as _User
+            ou = db.execute(select(_User).where(_User.id == agent.owner_user_id)).scalar_one_or_none()
+            owner_name = ou.name if ou else None
         items.append(
             {
                 "id": ar.id,
@@ -1225,6 +1324,10 @@ def approvals_list_partial(
                 "sensitivity": ar.sensitivity,
                 "sla_remaining": sla_rem,
                 "is_owner": agent is not None and agent.owner_user_id == user.id,
+                "params": ar.params or {},
+                "params_hash": getattr(ar, "params_hash", None),
+                "matched_rule_id": ar.matched_rule_id,
+                "owner_name": owner_name,
             }
         )
     return templates.TemplateResponse(
@@ -1234,6 +1337,425 @@ def approvals_list_partial(
     )
 
 
+<<<<<<< HEAD
+=======
+@router.get("/activity", response_class=HTMLResponse)
+def activity_trail_page(
+    request: Request,
+    agent_id: str | None = None,
+    decision: str | None = None,
+    risk_category: str | None = None,
+    outcome: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    all_agents = list(db.execute(select(Agent).order_by(Agent.name.asc())).scalars().all())
+    agents_map = {a.id: a for a in all_agents}
+    users_map = {u.id: u for u in db.execute(select(User)).scalars().all()}
+
+    query = select(ActionRequest).order_by(ActionRequest.created_at.desc())
+    if agent_id:
+        try:
+            aid = int(agent_id)
+            query = query.where(ActionRequest.agent_id == aid)
+        except ValueError:
+            pass
+
+    if decision:
+        query = query.where(ActionRequest.decision == decision)
+
+    if outcome:
+        query = query.where(ActionRequest.status == outcome)
+
+    actions = list(db.execute(query.limit(100)).scalars().all())
+
+    if risk_category:
+        filtered = []
+        for ar in actions:
+            ag = agents_map.get(ar.agent_id)
+            if ag and (ag.risk_category == risk_category or getattr(ag, "risk_tier", None) == risk_category):
+                filtered.append(ar)
+        actions = filtered
+
+    action_ids = [ar.id for ar in actions]
+    ledger_entries = list(
+        db.execute(
+            select(LedgerEntry).where(
+                LedgerEntry.event_type.in_([
+                    "action_evaluated",
+                    "action_allowed",
+                    "action_denied",
+                    "policy_breach_detected",
+                    "action_completed",
+                    "action_approved",
+                    "action_rejected",
+                ])
+            )
+        ).scalars().all()
+    )
+    action_seq_map: dict[int, int] = {}
+    for entry in ledger_entries:
+        try:
+            payload = json.loads(entry.payload_json) if isinstance(entry.payload_json, str) else entry.payload_json
+            aid = payload.get("action_id")
+            if aid in action_ids and aid not in action_seq_map:
+                action_seq_map[aid] = entry.seq
+        except Exception:
+            pass
+
+    items = []
+    for ar in actions:
+        ag = agents_map.get(ar.agent_id)
+        owner_name = None
+        if ag:
+            ou = users_map.get(ag.owner_user_id)
+            owner_name = ou.name if ou else "Unknown Owner"
+
+        decided_by_user = users_map.get(ar.decided_by) if ar.decided_by else None
+
+        items.append({
+            "id": ar.id,
+            "created_at": ar.created_at.strftime("%Y-%m-%d %H:%M:%S") if ar.created_at else "",
+            "tool": ar.tool,
+            "is_breach": getattr(ar, "is_breach", False),
+            "breach_reason": getattr(ar, "breach_reason", None),
+            "agent": {
+                "id": ag.id if ag else 0,
+                "name": ag.name if ag else "Unknown Agent",
+                "risk_category": ag.risk_category if ag else "medium",
+                "owner_name": owner_name,
+            },
+            "data_used": getattr(ar, "data_used", None) or [],
+            "matched_rule_id": ar.matched_rule_id,
+            "decision": ar.decision or ar.status,
+            "decided_by_name": decided_by_user.name if decided_by_user else None,
+            "decision_reason": ar.decision_reason or ar.reason,
+            "status": ar.status,
+            "ledger_seq": action_seq_map.get(ar.id),
+        })
+
+    params_dict = {}
+    if agent_id:
+        params_dict["agent_id"] = agent_id
+    if decision:
+        params_dict["decision"] = decision
+    if risk_category:
+        params_dict["risk_category"] = risk_category
+    if outcome:
+        params_dict["outcome"] = outcome
+    querystring = "&".join(f"{k}={v}" for k, v in params_dict.items())
+
+    return templates.TemplateResponse(
+        request,
+        "activity.html",
+        _ctx(
+            request,
+            db,
+            items=items,
+            all_agents=all_agents,
+            count=len(items),
+            querystring=querystring,
+            filters={
+                "agent_id": agent_id or "",
+                "decision": decision or "",
+                "risk_category": risk_category or "",
+                "outcome": outcome or "",
+            },
+        ),
+    )
+
+
+@router.get("/leadership", response_class=HTMLResponse)
+def leadership_dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    agents = list(db.execute(select(Agent).order_by(Agent.name.asc())).scalars().all())
+    users_map = {u.id: u for u in db.execute(select(User)).scalars().all()}
+    actions = list(db.execute(select(ActionRequest)).scalars().all())
+    incidents = list(db.execute(select(Incident)).scalars().all())
+
+    total_agents = len(agents)
+    active_agents = sum(1 for a in agents if a.status == "active")
+    restricted_agents = sum(1 for a in agents if a.status == "restricted")
+    paused_agents = sum(1 for a in agents if a.status == "paused")
+
+    total_breaches = sum(a.breach_count for a in agents) + sum(1 for ar in actions if getattr(ar, "is_breach", False))
+    open_incidents = sum(1 for inc in incidents if inc.status in ("open", "investigating"))
+
+    total_requests = len(actions)
+
+    agent_counts: dict[int, int] = {}
+    for ar in actions:
+        agent_counts[ar.agent_id] = agent_counts.get(ar.agent_id, 0) + 1
+
+    total_cost = 0.0
+    for a in agents:
+        c = (agent_counts.get(a.id, 0)) * (a.cost_per_call or 0.0)
+        total_cost += c
+
+    automated_actions = sum(1 for ar in actions if ar.status in ("allowed", "completed"))
+    hours_saved = automated_actions * 0.2
+    dollars_saved = hours_saved * 45.0
+
+    risk_counts = {
+        "low": sum(1 for a in agents if (a.risk_category == "low" or getattr(a, "risk_tier", "") == "low")),
+        "medium": sum(1 for a in agents if (a.risk_category == "medium" or getattr(a, "risk_tier", "") == "medium")),
+        "high": sum(1 for a in agents if (a.risk_category == "high" or getattr(a, "risk_tier", "") == "high")),
+        "critical": sum(1 for a in agents if (a.risk_category == "critical" or getattr(a, "risk_tier", "") == "critical")),
+    }
+
+    decisions = {
+        "allow": sum(1 for ar in actions if ar.decision == "allow" or ar.status in ("allowed", "completed")),
+        "require_approval": sum(1 for ar in actions if ar.decision == "require_approval" or ar.status in ("pending", "escalated", "approved", "rejected")),
+        "deny": sum(1 for ar in actions if ar.decision == "deny" or ar.status in ("denied", "failed")),
+    }
+
+    allocation_metrics = get_allocation_metrics(db)
+
+    stats = {
+        "total_agents": total_agents,
+        "active_agents": active_agents,
+        "restricted_agents": restricted_agents,
+        "paused_agents": paused_agents,
+        "total_breaches": total_breaches,
+        "open_incidents": open_incidents,
+        "total_cost": total_cost,
+        "total_requests": total_requests,
+        "hours_saved": hours_saved,
+        "dollars_saved": dollars_saved,
+        "risk_counts": risk_counts,
+        "allocation": {
+            "human_pct": allocation_metrics["human_allocated_pct"],
+            "agent_pct": allocation_metrics["agent_allocated_pct"],
+        },
+        "decisions": decisions,
+    }
+
+    agent_rows = []
+    for a in agents:
+        ou = users_map.get(a.owner_user_id)
+        req_count = agent_counts.get(a.id, 0)
+        agent_cost = req_count * (a.cost_per_call or 0.0)
+        agent_rows.append({
+            "id": a.id,
+            "name": a.name,
+            "owner_name": ou.name if ou else "Unknown",
+            "risk_category": a.risk_category,
+            "status": a.status,
+            "permitted_actions": a.permitted_actions or [],
+            "data_access": a.data_access or [],
+            "request_count": req_count,
+            "cost_accrued": agent_cost,
+            "total_cost": agent_cost,
+            "breach_count": a.breach_count,
+        })
+
+    return templates.TemplateResponse(
+        request,
+        "leadership.html",
+        _ctx(
+            request,
+            db,
+            stats=stats,
+            agent_rows=agent_rows,
+        ),
+    )
+
+
+@router.post("/agents/{agent_id}/pause")
+def web_agent_pause(
+    request: Request,
+    agent_id: int,
+    reason: str = Form("Manual pause by operator"),
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    verify_csrf(request, csrf_token)
+    if user.role not in ("admin", "reviewer"):
+        raise HTTPException(status_code=403, detail="Forbidden: Admin or Reviewer role required")
+    agent = db.execute(select(Agent).where(Agent.id == agent_id)).scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    pause_agent(db, agent, by=str(user.id), reason=reason or "Manual pause by operator")
+    db.commit()
+    referer = request.headers.get("Referer") or f"/agents/{agent_id}"
+    return RedirectResponse(referer, status_code=303)
+
+
+@router.post("/agents/{agent_id}/restrict")
+def web_agent_restrict(
+    request: Request,
+    agent_id: int,
+    reason: str = Form("Manual restriction by operator"),
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    verify_csrf(request, csrf_token)
+    if user.role not in ("admin", "reviewer"):
+        raise HTTPException(status_code=403, detail="Forbidden: Admin or Reviewer role required")
+    agent = db.execute(select(Agent).where(Agent.id == agent_id)).scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    restrict_agent(db, agent, by=str(user.id), reason=reason or "Manual restriction by operator")
+    db.commit()
+    referer = request.headers.get("Referer") or f"/agents/{agent_id}"
+    return RedirectResponse(referer, status_code=303)
+
+
+@router.post("/agents/{agent_id}/resume")
+def web_agent_resume(
+    request: Request,
+    agent_id: int,
+    reason: str = Form("Manual resume by admin"),
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    verify_csrf(request, csrf_token)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden: Admin role required to resume agent")
+    agent = db.execute(select(Agent).where(Agent.id == agent_id)).scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    resume_agent(db, agent, by=str(user.id), reason=reason or "Manual resume by admin")
+    db.commit()
+    referer = request.headers.get("Referer") or f"/agents/{agent_id}"
+    return RedirectResponse(referer, status_code=303)
+
+
+@router.get("/incidents", response_class=HTMLResponse)
+def incidents_list_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    incidents = list(db.execute(select(Incident).order_by(Incident.created_at.desc())).scalars().all())
+    agents_map = {a.id: a for a in db.execute(select(Agent)).scalars().all()}
+    users_map = {u.id: u for u in db.execute(select(User)).scalars().all()}
+
+    open_count = sum(1 for i in incidents if i.status == "open")
+    investigating_count = sum(1 for i in incidents if i.status == "investigating")
+    resolved_count = sum(1 for i in incidents if i.status == "resolved")
+
+    stats = {
+        "open": open_count,
+        "investigating": investigating_count,
+        "resolved": resolved_count,
+    }
+
+    inc_items = []
+    for inc in incidents:
+        ag = agents_map.get(inc.agent_id) if inc.agent_id else None
+        assignee = users_map.get(inc.assigned_user_id) if inc.assigned_user_id else None
+        inc_items.append({
+            "id": inc.id,
+            "title": inc.title,
+            "description": inc.description,
+            "severity": inc.severity,
+            "status": inc.status,
+            "agent_name": ag.name if ag else None,
+            "owner_name": assignee.name if assignee else (users_map.get(ag.owner_user_id).name if ag and ag.owner_user_id in users_map else None),
+            "created_at": inc.created_at.strftime("%Y-%m-%d %H:%M") if inc.created_at else "",
+        })
+
+    all_agents = list(db.execute(select(Agent).order_by(Agent.name.asc())).scalars().all())
+
+    return templates.TemplateResponse(
+        request,
+        "incidents.html",
+        _ctx(
+            request,
+            db,
+            stats=stats,
+            incidents=inc_items,
+            all_agents=all_agents,
+        ),
+    )
+
+
+@router.post("/incidents")
+def create_incident_form(
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(...),
+    severity: str = Form("medium"),
+    agent_id: int | None = Form(None),
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    verify_csrf(request, csrf_token)
+    if user.role not in ("admin", "reviewer"):
+        return RedirectResponse("/incidents?toast=Auditors+cannot+file+incidents", status_code=303)
+
+    open_incident(
+        db,
+        title=title,
+        description=description,
+        creator_user=user,
+        agent_id=agent_id,
+        action_request_id=None,
+        severity=severity,
+        assigned_user_id=user.id,
+    )
+    db.commit()
+    return RedirectResponse("/incidents?toast=Incident+created", status_code=303)
+
+
+@router.get("/incidents/{incident_id}", response_class=HTMLResponse)
+def incident_detail_page(
+    request: Request,
+    incident_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    chain = get_accountability_chain(db, incident_id)
+    if not chain:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    incident = db.execute(select(Incident).where(Incident.id == incident_id)).scalar_one_or_none()
+    return templates.TemplateResponse(
+        request,
+        "incident_detail.html",
+        _ctx(
+            request,
+            db,
+            incident=incident,
+            chain=chain,
+        ),
+    )
+
+
+@router.post("/incidents/{incident_id}/resolve")
+def resolve_incident_form(
+    request: Request,
+    incident_id: int,
+    resolution_notes: str = Form(""),
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    verify_csrf(request, csrf_token)
+    if user.role not in ("admin", "reviewer"):
+        return RedirectResponse(f"/incidents/{incident_id}?toast=Auditors+cannot+resolve+incidents", status_code=303)
+
+    if len(resolution_notes.strip()) < 10:
+        return RedirectResponse(f"/incidents/{incident_id}?toast=Resolution+notes+must+be+at+least+10+characters", status_code=303)
+
+    try:
+        resolve_incident(db, incident_id, user, resolution_notes)
+        db.commit()
+    except (IncidentError, ValueError) as e:
+        return RedirectResponse(f"/incidents/{incident_id}?toast={str(e)}", status_code=303)
+
+    return RedirectResponse(f"/incidents/{incident_id}?toast=Incident+resolved", status_code=303)
+
+
+>>>>>>> a981b25 (New Updates)
 @router.get("/audit", response_class=HTMLResponse)
 @router.get("/audit/agent/{agent_id}", response_class=HTMLResponse)
 def audit_report(
@@ -1259,6 +1781,7 @@ def audit_report(
             .limit(200)
         )
     actions = list(db.execute(q).scalars().all())
+<<<<<<< HEAD
     users = {u.id: u for u in db.execute(select(User)).scalars().all()}
     rows = []
     for ar in actions:
@@ -1276,14 +1799,125 @@ def audit_report(
                 "reason": (ar.decision_reason or ar.reason or "")[:120],
             }
         )
+=======
+    all_agents = list(db.execute(select(Agent)).scalars().all())
+    agents_map = {a.id: a for a in all_agents}
+    users = {u.id: u for u in db.execute(select(User)).scalars().all()}
+
+    # Agents snapshot
+    agents_snapshot = []
+    target_agents = [agent] if agent else all_agents
+    for ag in target_agents:
+        ou = users.get(ag.owner_user_id)
+        agents_snapshot.append({
+            "id": ag.id,
+            "name": ag.name,
+            "purpose": ag.purpose,
+            "owner_name": ou.name if ou else "Unknown",
+            "owner_email": ou.email if ou else "",
+            "risk_category": ag.risk_category,
+            "permitted_actions": ag.permitted_actions or [],
+            "data_access": ag.data_access or [],
+            "status": ag.status,
+            "status_reason": ag.status_reason,
+        })
+
+    # Approvals log
+    approvals_log = []
+    approvals = list(
+        db.execute(
+            select(ActionRequest)
+            .where(ActionRequest.status.in_(["approved", "rejected"]))
+            .order_by(ActionRequest.decided_at.desc())
+            .limit(100)
+        ).scalars().all()
+    )
+    for ar in approvals:
+        if agent_id and ar.agent_id != agent_id:
+            continue
+        ag = agents_map.get(ar.agent_id)
+        ou = users.get(ag.owner_user_id) if ag else None
+        approver = users.get(ar.decided_by) if ar.decided_by else None
+        approvals_log.append({
+            "action_id": ar.id,
+            "tool": ar.tool,
+            "agent_name": ag.name if ag else "?",
+            "owner_name": ou.name if ou else "?",
+            "approver_name": approver.name if approver else "Auto",
+            "decided_at": ar.decided_at.strftime("%Y-%m-%d %H:%M UTC") if ar.decided_at else "",
+            "reason": ar.decision_reason or "",
+        })
+
+    # Breaches log
+    breaches_log = []
+    breach_actions = list(
+        db.execute(
+            select(ActionRequest)
+            .where(ActionRequest.is_breach == True)  # noqa: E712
+            .order_by(ActionRequest.created_at.desc())
+            .limit(50)
+        ).scalars().all()
+    )
+    for ba in breach_actions:
+        if agent_id and ba.agent_id != agent_id:
+            continue
+        ag = agents_map.get(ba.agent_id)
+        breaches_log.append({
+            "ts": ba.created_at.strftime("%Y-%m-%d %H:%M UTC") if ba.created_at else "",
+            "agent_name": ag.name if ag else "?",
+            "tool": ba.tool,
+            "reason": ba.breach_reason or "Policy breach detected",
+            "action_taken": "Agent Paused, Incident Opened, Denied",
+        })
+
+    # Incidents log
+    incidents_q = select(Incident).order_by(Incident.created_at.desc()).limit(50)
+    if agent_id:
+        incidents_q = incidents_q.where(Incident.agent_id == agent_id)
+    incidents_rows = list(db.execute(incidents_q).scalars().all())
+    incidents_log = []
+    for inc in incidents_rows:
+        ag = agents_map.get(inc.agent_id) if inc.agent_id else None
+        ou = users.get(ag.owner_user_id) if ag else None
+        incidents_log.append({
+            "id": inc.id,
+            "severity": inc.severity,
+            "title": inc.title,
+            "description": inc.description,
+            "agent_name": ag.name if ag else "System-wide",
+            "owner_name": ou.name if ou else "N/A",
+            "status": inc.status,
+            "resolution_notes": inc.resolution_notes,
+        })
+
+>>>>>>> a981b25 (New Updates)
     stats = {
         "total": len(actions),
         "allowed": sum(1 for a in actions if a.status in ("allowed", "approved", "completed")),
         "denied": sum(1 for a in actions if a.status in ("denied", "rejected")),
+<<<<<<< HEAD
         "pending": sum(1 for a in actions if a.status in ("pending", "escalated")),
     }
     verify = ledger.verify(db)
     head = ledger.get_head(db)
+=======
+        "approved": len(approvals_log),
+        "breaches": len(breaches_log),
+        "open_incidents": sum(1 for i in incidents_rows if i.status in ("open", "investigating")),
+        "total_incidents": len(incidents_rows),
+    }
+    verify = ledger.verify(db)
+    head = ledger.get_head(db)
+
+    checkpoint = None
+    checkpoint_status = "VALID"
+    try:
+        from app.services.checkpoints import get_latest_checkpoint
+        checkpoint = get_latest_checkpoint(db)
+    except Exception:
+        pass
+
+>>>>>>> a981b25 (New Updates)
     return templates.TemplateResponse(
         request,
         "audit_report.html",
@@ -1292,6 +1926,7 @@ def audit_report(
             db,
             agent=agent,
             owner_name=owner_name,
+<<<<<<< HEAD
             rows=rows,
             stats=stats,
             verify=verify,
@@ -1300,3 +1935,110 @@ def audit_report(
         ),
     )
 
+=======
+            agents_snapshot=agents_snapshot,
+            approvals_log=approvals_log,
+            breaches_log=breaches_log,
+            incidents_log=incidents_log,
+            stats=stats,
+            verify=verify,
+            head=head,
+            checkpoint=checkpoint,
+            checkpoint_status=checkpoint_status,
+            generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+        ),
+    )
+
+
+@router.get("/audit/export")
+def audit_export_json(
+    request: Request,
+    agent_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_web_user),
+):
+    """JSON export of governance audit report."""
+    all_agents = list(db.execute(select(Agent)).scalars().all())
+    agents_map = {a.id: a for a in all_agents}
+    users = {u.id: u for u in db.execute(select(User)).scalars().all()}
+
+    target_agents = [agents_map[agent_id]] if agent_id and agent_id in agents_map else all_agents
+
+    agents_data = []
+    for ag in target_agents:
+        ou = users.get(ag.owner_user_id)
+        agents_data.append({
+            "id": ag.id,
+            "name": ag.name,
+            "purpose": ag.purpose,
+            "owner": {"id": ou.id if ou else None, "name": ou.name if ou else None, "email": ou.email if ou else None},
+            "risk_category": ag.risk_category,
+            "status": ag.status,
+            "status_reason": ag.status_reason,
+            "permitted_actions": ag.permitted_actions or [],
+            "data_access": ag.data_access or [],
+            "breach_count": ag.breach_count,
+            "cost_per_call": ag.cost_per_call,
+        })
+
+    q = select(ActionRequest).order_by(ActionRequest.created_at.desc()).limit(200)
+    if agent_id:
+        q = q.where(ActionRequest.agent_id == agent_id)
+    actions = list(db.execute(q).scalars().all())
+
+    actions_data = []
+    for ar in actions:
+        ag = agents_map.get(ar.agent_id)
+        decider = users.get(ar.decided_by) if ar.decided_by else None
+        actions_data.append({
+            "id": ar.id,
+            "agent_id": ar.agent_id,
+            "agent_name": ag.name if ag else None,
+            "tool": ar.tool,
+            "params": redact_params(ar.params or {}, getattr(ar, "sensitivity", "internal")),
+            "data_used": getattr(ar, "data_used", None) or [],
+            "decision": ar.decision,
+            "matched_rule_id": ar.matched_rule_id,
+            "status": ar.status,
+            "is_breach": getattr(ar, "is_breach", False),
+            "breach_reason": getattr(ar, "breach_reason", None),
+            "decided_by": decider.name if decider else None,
+            "decision_reason": ar.decision_reason,
+            "created_at": ar.created_at.isoformat() if ar.created_at else None,
+        })
+
+    inc_q = select(Incident).order_by(Incident.created_at.desc()).limit(50)
+    if agent_id:
+        inc_q = inc_q.where(Incident.agent_id == agent_id)
+    incidents = list(db.execute(inc_q).scalars().all())
+    incidents_data = [
+        {
+            "id": inc.id,
+            "title": inc.title,
+            "description": inc.description,
+            "severity": inc.severity,
+            "status": inc.status,
+            "agent_id": inc.agent_id,
+            "resolution_notes": inc.resolution_notes,
+            "created_at": inc.created_at.isoformat() if inc.created_at else None,
+            "resolved_at": inc.resolved_at.isoformat() if inc.resolved_at else None,
+        }
+        for inc in incidents
+    ]
+
+    verify = ledger.verify(db)
+    head = ledger.get_head(db)
+
+    report = {
+        "report_type": "AgentWarden Governance Audit Report",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "ledger_verification": verify,
+        "ledger_head": head,
+        "agents": agents_data,
+        "recent_actions": actions_data,
+        "incidents": incidents_data,
+    }
+    return JSONResponse(report)
+
+
+>>>>>>> a981b25 (New Updates)
