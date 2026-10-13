@@ -27,6 +27,7 @@ from app.api import (
 )
 from app.config import get_settings
 from app.db import SessionLocal, check_db_connection, init_db
+from app.demo_bootstrap import ensure_demo_data
 from app.logging_config import setup_logging
 from app.security import RedirectToLogin, assert_safe_secrets
 from app.services.escalation import start_escalation_task, stop_escalation_task
@@ -61,6 +62,9 @@ async def lifespan(app: FastAPI):
         db.commit()
     finally:
         db.close()
+    # DEMO_MODE only: create demo users/agents/policy if the database is empty.
+    # Never resets existing data; never raises (see app/demo_bootstrap.py).
+    ensure_demo_data()
     start_escalation_task(interval=3.0)
     yield
     stop_escalation_task()

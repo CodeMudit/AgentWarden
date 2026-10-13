@@ -99,14 +99,20 @@ DEMO_POLICY = {
         {
             "id": "sql-analytics-allow",
             "priority": 12,
-            "match": {"agents": ["sql-analytics-agent"], "tools": ["run_readonly_query", "export_csv"]},
+            "match": {
+                "agents": ["sql-analytics-agent"],
+                "tools": ["run_readonly_query", "export_csv"],
+            },
             "conditions": [],
             "effect": "allow",
         },
         {
             "id": "remediation-critical-review",
             "priority": 8,
-            "match": {"agents": ["auto-remediation-bot"], "tools": ["rollback_deployment", "restart_service"]},
+            "match": {
+                "agents": ["auto-remediation-bot"],
+                "tools": ["rollback_deployment", "restart_service"],
+            },
             "conditions": [],
             "effect": "require_approval",
         },
@@ -389,7 +395,12 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
                     owner_id = agent.owner_user_id
                     decider = reviewer_b if owner_id == reviewer_a.id else reviewer_a
                     if rng.random() < 0.6:
-                        approve(db, ar.id, decider, "Historical seed approval – verified customer request")
+                        approve(
+                            db,
+                            ar.id,
+                            decider,
+                            "Historical seed approval – verified customer request",
+                        )
                     else:
                         reject(db, ar.id, decider, "Historical seed rejection – policy review")
                 except Exception:
@@ -405,7 +416,9 @@ def seed_history(db, agents: dict[str, tuple[Agent, str | None]], n: int = 50) -
     console.print(f"[green]Created {created} historical action requests[/green]")
 
 
-def seed_work_allocation_and_incidents(db, users: dict[str, User], agents: dict[str, tuple[Agent, str | None]]) -> None:
+def seed_work_allocation_and_incidents(
+    db, users: dict[str, User], agents: dict[str, tuple[Agent, str | None]]
+) -> None:
     """Seed work items (human-vs-agent allocation) and sample incidents."""
     refund_bot = agents["refund-bot"][0]
     email_bot = agents["email-assistant"][0]
@@ -474,18 +487,21 @@ def seed_work_allocation_and_incidents(db, users: dict[str, User], agents: dict[
     console.print("[green]Seeded work allocation tasks and accountability incident[/green]")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed AgentWarden demo data")
-    parser.add_argument("--reset", action="store_true", help="Wipe and reseed")
-    args = parser.parse_args()
+def run_seed(db, reset: bool = False, verbose: bool = True) -> dict:
+    """Seed users, agents, policy, history, work items and an incident.
 
-    init_db()
-    db = SessionLocal()
+    Importable entry point (used by ``app.demo_bootstrap`` on an empty DEMO_MODE database).
+    Idempotent for users/agents/policy; ``reset=True`` wipes everything first.
+    Returns ``{"users": ..., "agents": ..., "policy": ...}``.
+    """
+    global console
+    previous = console
+    console = Console(quiet=not verbose)
     try:
         ledger.ensure_genesis(db)
         db.commit()
 
-        if args.reset:
+        if reset:
             reset_db(db)
 
         console.print("[bold]Seeding AgentWarden…[/bold]")
@@ -500,7 +516,20 @@ def main() -> None:
         console.print(f"  Policy v{policy.version} active")
         seed_history(db, agents, n=50)
         seed_work_allocation_and_incidents(db, users, agents)
+        return {"users": users, "agents": agents, "policy": policy}
+    finally:
+        console = previous
 
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Seed AgentWarden demo data")
+    parser.add_argument("--reset", action="store_true", help="Wipe and reseed")
+    args = parser.parse_args()
+
+    init_db()
+    db = SessionLocal()
+    try:
+        run_seed(db, reset=args.reset, verbose=True)
         console.print("\n[bold green]Seed complete.[/bold green]")
         console.print("Demo logins:")
         console.print("  admin@demo.local / demo-admin-pass")
