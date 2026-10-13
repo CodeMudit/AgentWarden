@@ -1,0 +1,27 @@
+{# QR that points at <this host>/judge. Rendered client-side so it is always correct for
+   whatever host serves the page (localhost, Render, ngrok). Library comes from jsdelivr,
+   which the CSP already allows. #}
+<div class="inline-block">
+  <div id="judge-qr" class="bg-white p-3 rounded-xl border border-slate-200 w-52 h-52 flex items-center justify-center text-xs text-slate-400 text-center">
+    Generating QR…
+  </div>
+  <p id="judge-qr-url" class="mt-2 text-xs font-mono text-slate-500 break-all max-w-[13rem]"></p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+(function () {
+  var url = window.location.origin + '/judge';
+  var box = document.getElementById('judge-qr');
+  document.getElementById('judge-qr-url').textContent = url;
+  try {
+    var qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    box.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true });
+    var svg = box.querySelector('svg');
+    if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
+  } catch (e) {
+    box.innerHTML = '<a class="underline text-brand-600" href="' + url + '">' + url + '</a>';
+  }
+})();
+</script>

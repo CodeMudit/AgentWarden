@@ -32,11 +32,10 @@
   <div class="md:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm flex flex-wrap gap-6 items-center">
     <div>
       <h3 class="font-semibold text-sm mb-1">Judge as reviewer</h3>
-      <p class="text-xs text-slate-500 mb-2">Scan to open the approval queue on a phone (same host as this page).</p>
+      <p class="text-xs text-slate-500 mb-2">Scan to open the judge page on a phone (same host as this page).</p>
       <p class="text-xs font-mono text-slate-400 break-all" x-text="approveUrl"></p>
     </div>
-    <img :src="'https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=' + encodeURIComponent(approveUrl)"
-         width="140" height="140" alt="QR code to approvals" class="rounded-lg border border-slate-200 dark:border-slate-700" />
+    {% include "partials/judge_qr.html" %}
   </div>
 
   <div class="md:col-span-2 rounded-2xl border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/20 p-5">
@@ -53,7 +52,7 @@ function demoLab() {
   return {
     busy: false,
     results: {},
-    approveUrl: window.location.origin + '/approvals',
+    approveUrl: window.location.origin + '/judge',
     async run(key) {
       this.busy = true;
       this.results[key] = 'Running…';

@@ -191,6 +191,82 @@ def login_submit(
     return response
 
 
+# ---------- Judge entry (DEMO_MODE only) ----------
+
+JUDGE_REVIEWER_EMAIL = "reviewer_b@demo.local"
+
+
+@router.get("/judge", response_class=HTMLResponse)
+def judge_page(request: Request, db: Session = Depends(get_db)):
+    """Public landing page for judges (QR target). Only exists in DEMO_MODE."""
+    if not get_settings().demo_mode:
+        raise HTTPException(status_code=404, detail="Not found")
+    csrf = request.cookies.get(CSRF_COOKIE) or generate_csrf_token()
+    response = templates.TemplateResponse(
+        request, "judge.html", {**_ctx(request, db), "csrf_token": csrf, "error": None}
+    )
+    response.set_cookie(CSRF_COOKIE, csrf, httponly=False, samesite="lax", max_age=60 * 60 * 12)
+    return response
+
+
+@router.post("/judge/enter")
+def judge_enter(
+    request: Request,
+    csrf_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """One-tap sign-in as the demo reviewer. The same credentials are already shown
+    on /login in DEMO_MODE, so this adds no new exposure; it is disabled otherwise."""
+    settings = get_settings()
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="Not found")
+    verify_csrf(request, csrf_token)
+    client_ip = request.client.host if request.client else "unknown"
+    check_login_rate_limit(client_ip)
+    record_login_attempt(client_ip)
+    user = db.execute(
+        select(User).where(User.email == JUDGE_REVIEWER_EMAIL)
+    ).scalar_one_or_none()
+    if user is None or not user.is_active:
+        csrf = request.cookies.get(CSRF_COOKIE) or generate_csrf_token()
+        return templates.TemplateResponse(
+            request,
+            "judge.html",
+            {
+                **_ctx(request, db),
+                "csrf_token": csrf,
+                "error": "Demo reviewer account not found. Ask the team to re-seed.",
+            },
+            status_code=503,
+        )
+    response = RedirectResponse("/approvals", status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE,
+        create_session_token(user.id),
+        httponly=True,
+        samesite="lax",
+        secure=not settings.debug,
+        max_age=60 * 60 * 12,
+    )
+    response.set_cookie(
+        CSRF_COOKIE, generate_csrf_token(), httponly=False, samesite="lax", max_age=60 * 60 * 12
+    )
+    try:
+        ledger.append(
+            db,
+            event_type="user_login",
+            actor_type="user",
+            actor_id=str(user.id),
+            subject_type="user",
+            subject_id=str(user.id),
+            payload={"email": user.email, "via": "judge_qr"},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return response
+
+
 @router.post("/logout")
 def logout(request: Request, csrf_token: str = Form(""), db: Session = Depends(get_db)):
     verify_csrf(request, csrf_token)

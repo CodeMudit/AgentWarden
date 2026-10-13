@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Judges · AgentWarden{% endblock %}
+{% block auth_content %}
+<div class="min-h-screen flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-950">
+  <div class="w-full max-w-lg rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-sm">
+    <div class="flex items-center gap-3 mb-5">
+      <div class="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold">AW</div>
+      <h1 class="text-xl font-bold">AgentWarden · Judge access</h1>
+    </div>
+    <p class="text-sm text-slate-600 dark:text-slate-300 mb-4">
+      AI agents ask AgentWarden before risky actions. Rules decide ALLOW / DENY / REQUIRE APPROVAL;
+      risky ones wait for a human. You are about to act as that human reviewer.
+    </p>
+    <ol class="text-sm text-slate-600 dark:text-slate-300 list-decimal pl-5 space-y-1 mb-6">
+      <li>Tap the button below (signs you in as <span class="font-mono">Reviewer B</span>).</li>
+      <li>Open a pending request in <strong>Approvals</strong>.</li>
+      <li>Approve or reject it with a written reason. You cannot approve your own agent's request.</li>
+      <li>Check the <strong>Ledger</strong> page to see every step recorded and verifiable.</li>
+    </ol>
+    {% if error %}
+    <div class="mb-4 rounded-xl bg-deny-muted text-deny px-4 py-3 text-sm">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/judge/enter">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit" class="w-full rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-medium py-3 text-sm transition">
+        Enter as reviewer
+      </button>
+    </form>
+    <p class="mt-4 text-xs text-slate-400 text-center">
+      Prefer to type it? <a class="underline" href="/login">Login page</a> ·
+      <span class="font-mono">reviewer_b@demo.local / demo-reviewer-pass</span>
+    </p>
+  </div>
+</div>
+{% endblock %}
